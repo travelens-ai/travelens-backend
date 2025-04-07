@@ -5,7 +5,7 @@ import os
 app = Flask(__name__)
 
 # Initialize the recommendation system
-api_key = os.getenv('GOOGLE_API_KEY', "AIzaSyAuJmq-huDk2yKbkF1-Kb1QacTA4Cs59wA")
+api_key = os.getenv('GOOGLE_API_KEY', "AIzaSyDrsp2VLdY5q_ZztVQBfFS8AboxnYl9Aas")
 recommender = ItenaryRecommendationSystem(api_key=api_key)
 recommender.initialize()
 
