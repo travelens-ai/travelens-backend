@@ -423,6 +423,13 @@ class ItenaryRecommendationSystem:
         12. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
         13. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
         14. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        15. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
+          - user’s `places_of_interest`
+          - preferred activities
+          - travel group type
+          - food preferences
+          - user location (for budget-friendly or closer alternatives)
+          - trip type (Beach, mountain, hill station, Religious site, Nature etc.)
 
         ---
 
@@ -468,6 +475,16 @@ class ItenaryRecommendationSystem:
           "name": "Place Name",
           "description": "Short description of the place",
           "image": "Add a real image URL that directly opens the image (no placeholders)"
+          "similar_places": [
+              {{
+                "place_name": "Alternative Destination 1",
+                "description": "Why this is a good fit based on user's preferences"
+              }},
+              {{
+                "place_name": "Alternative Destination 2",
+                "description": "Why this is a good fit based on user's preferences"
+              }}
+            ]
         }}
         """
 
