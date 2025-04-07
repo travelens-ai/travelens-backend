@@ -403,16 +403,18 @@ class ItenaryRecommendationSystem:
         ### 🧠 Rules
 
         1. Use ONLY the recommended places. No made-up locations.
-        2. Plan for {user_preferences['trip_duration']} days.
-        3. Each day: include 2–3 geographically close places.
-        4. For each place: give name, location, reason (based on user interest), activities, and estimated visit time (e.g. "1.5–2 hours").
-        5. Suggest 2–3 restaurants per day (match cuisine & location). Use only from dataset.
-        6. Suggest 2–3 hotels per day (low, mid, high range). Use real data.
-        7. For each restaurant/hotel: include name, type, cost, rating, location, reason for recommendation, and a link or image if available.
-        8. On Day 1 and final day, choose places/hotels closer to airport or station.
-        9. Don’t repeat places on different days.
-        10. Keep travel path linear (avoid A → B → A style).
-        11. If no data is available, suggest real known options using general knowledge (never invent fake names).
+        2. Plan for up to {user_preferences['trip_duration']} days.
+        3. If data is not available for all days, generate for fewer days (do not force full trip duration).
+        4. Each day: include 2–3 geographically close places.
+        5. For each place: give name, location, reason (based on user interest), activities, and estimated visit time (e.g. "1.5–2 hours").
+        6. Suggest 2–3 restaurants per day (match cuisine & location). Use only from dataset.
+        7. Suggest 2–3 hotels per day (low, mid, high range). Use real data.
+        8. For each restaurant/hotel: include name, type, cost, rating, location, reason for recommendation, and a link or image if available.
+        9. On Day 1 and final day, choose places/hotels closer to airport or station.
+        10. Don’t repeat places on different days.
+        11. Keep travel path linear (avoid A → B → A style).
+        12. If no data is available, suggest real known options using general knowledge (never invent fake names).
+        13. Always return response in correct JSON format only (even if data is incomplete or days are fewer).
 
         ---
 
@@ -453,13 +455,11 @@ class ItenaryRecommendationSystem:
                 }}
             ]
             }}
-            // Repeat for each day
+            // Repeat for each day (only if data is available)
         ],
-        "name":"Place Name",
-        "description": "Add Short description about the place"
-        "image" :"Add image of the place. Add Image url which have some image and can be open (real image link only)"
-        }}
-        
+        "name": "Place Name",
+        "description": "Add short description about the place",
+        "image": "Add real image URL that opens directly (no placeholders or fake links)"
         }}
         """
         return textwrap.dedent(prompt)
