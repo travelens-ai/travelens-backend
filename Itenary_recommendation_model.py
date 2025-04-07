@@ -367,104 +367,109 @@ class ItenaryRecommendationSystem:
 
     def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
         prompt = f"""
-                You are a smart AI that helps create a personalized multi-day travel itinerary.
+        You are a smart AI that helps create a personalized multi-day travel itinerary.
 
-                Use only the information provided below: user preferences, recommended places, real restaurant and hotel datasets. If no data is available include place , hotel or restaurant using your Knowledge in same format as below json.
+        Use the information provided below: user preferences, recommended places, real restaurant and hotel datasets. 
+        If no data is available, use your general travel knowledge to add relevant places, hotels, or restaurants — but always follow the format strictly.
 
-                ---
+        ---
 
-                ### 👤 User Preferences
-                - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
-                - Places of interest: {user_preferences['places_of_interest']}
-                - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
-                - Food preferences: {user_preferences['food_preferences']}
-                - Starting location: {user_preferences['user_location']}
-                - Travel month: {user_preferences['current_month']}
-                - Trip type: {user_preferences['trip_type']}
-                - Trip duration: {user_preferences['trip_duration']} days
+        ### 👤 User Preferences
+        - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
+        - Places of interest: {user_preferences['places_of_interest']}
+        - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
+        - Food preferences: {user_preferences['food_preferences']}
+        - Starting location: {user_preferences['user_location']}
+        - Travel month: {user_preferences['current_month']}
+        - Trip type: {user_preferences['trip_type']}
+        - Trip duration: {user_preferences['trip_duration']} days
 
-                ---
+        ---
 
-                ### 📍 Recommended Places (Use only these!)
-                {top_places}
+        ### 📍 Recommended Places (Use only these when available!)
+        {top_places}
 
-                ---
+        ---
 
-                ### 🍽️ Restaurants Dataset (Real data only)
-                {top_restaurants}
+        ### 🍽️ Restaurants Dataset (Use only real data when available)
+        {top_restaurants}
 
-                ---
+        ---
 
-                ### 🏨 Hotels Dataset (Real data only)
-                {top_hotels}
+        ### 🏨 Hotels Dataset (Use only real data when available)
+        {top_hotels}
 
-                ---
+        ---
 
-                ### 🧠 Rules
+        ### 🧠 Rules
 
-                1. Final output must be 100% valid JSON. Strictly no broken format.
-                2. Use ONLY the recommended places. No made-up locations.
-                3. Plan for {user_preferences['trip_duration']} full days. 
-                4. Each day: include 2–3 geographically close places.
-                5. For each place: give name, location, reason (based on user interest), activities, and estimated visit time (e.g. "1.5–2 hours").
-                6. Suggest 2–3 restaurants per day (match cuisine & location). Use only from dataset. If Nothing in Dataset use your knowledge.
-                7. Suggest 2–3 hotels per day (low, mid, high range). Use only from dataset. If Nothing in Dataset use your knowledge.
-                8. For each restaurant/hotel: include name, type, cost, rating, location, reason for recommendation, and a link or image if available.
-                9. On Day 1 and final day, choose places/hotels closer to airport or station.
-                10. Don’t repeat places on different days.
-                11. Keep travel path linear (avoid A → B → A style).
-                12. Always return response in correct JSON format only (even if data is incomplete or days are fewer).
-                13. Do not include any comments or markdown in the JSON response.
-                14. ❗ Do NOT include trailing commas — not after the last item in any array or after the last key in any object.
-                15. If no data is available include hotel or restaurant using your Knowledge in same format as below json.
-                16. Do not include any extra information or explanations outside the JSON response.
+        1. The final output **must be 100% valid JSON**. Strictly no broken or partial JSON.
+        2. You **must generate exactly {user_preferences['trip_duration']} full days** in the itinerary — no more, no fewer. This is not negotiable.
+        3. If datasets do not have enough entries to cover all days, you **must use GenAI knowledge** to fill missing places, restaurants, or hotels.
+        4. Each day must include:
+          - 2–3 geographically close places to visit.
+          - 2–3 restaurants (match cuisine and location).
+          - 2–3 hotels (low, mid, and high budget options).
+        5. For each place, include:
+          - `name`, `location`, `reason`, `activities`, and estimated visit time (e.g., "1.5–2 hours").
+        6. For each restaurant, include:
+          - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
+        7. For each hotel, include:
+          - `name`, `type`, `price_range`, `rating`, `location`, `reason`, and a `link` (either from dataset or generated if missing).
+        8. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
+        9. Avoid repeating places, hotels, or restaurants on different days.
+        10. Keep the travel flow linear — do not plan A → B → A routes.
+        11. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
+        12. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
+        13. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
+        14. Always generate a full response — no placeholder text like “TBD” or “N/A”.
 
-                ---
+        ---
 
-                ### 📦 Output Format (JSON)
+        ### 📦 Output Format (JSON)
 
+        {{
+          "itinerary": [
+            {{
+              "day": 1,
+              "places_to_visit": [
                 {{
-                "itinerary": [
-                    {{
-                    "day": 1,
-                    "places_to_visit": [
-                        {{
-                        "name": "Place Name",
-                        "location": "City, State",
-                        "reason": "Matches your interest in [e.g. temples, nature]",
-                        "activities": ["Activity 1", "Activity 2"],
-                        "duration": "1.5–2 hours"
-                        }}
-                    ],
-                    "restaurants": [
-                        {{
-                        "name": "Restaurant Name",
-                        "cuisine": "Cuisine Type",
-                        "approx_cost": "₹XXX",
-                        "rating": "X.X",
-                        "location": "Area Name",
-                        "reason": "Matches your food preference: {user_preferences['food_preferences']}"
-                        }}
-                    ],
-                    "hotels": [
-                        {{
-                        "name": "Hotel Name",
-                        "type": "Hotel Type",
-                        "price_range": "low | mid | high",
-                        "rating": "X.X",
-                        "location": "City",
-                        "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
-                        "link": "Add valid Page URL from hotel dataset {top_hotels['pageurl']}"
-                        }}
-                    ]
-                    }}
-                    // More days (same format) — Do NOT add a comma after the last day.
-                ],
-                "name": "Place Name",
-                "description": "Short description of the place",
-                "image": "Add a real image URL that directly opens the image (no placeholders)"
+                  "name": "Place Name",
+                  "location": "City, State",
+                  "reason": "Matches your interest in [e.g. temples, nature]",
+                  "activities": ["Activity 1", "Activity 2"],
+                  "duration": "1.5–2 hours"
                 }}
-                """
+              ],
+              "restaurants": [
+                {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX",
+                  "rating": "X.X",
+                  "location": "Area Name",
+                  "reason": "Matches your food preference: {user_preferences['food_preferences']}"
+                }}
+              ],
+              "hotels": [
+                {{
+                  "name": "Hotel Name",
+                  "type": "Hotel Type",
+                  "price_range": "low | mid | high",
+                  "rating": "X.X",
+                  "location": "City",
+                  "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
+                  "link": "Add valid Page URL from hotel dataset or generated link"
+                }}
+              ]
+            }}
+            // Repeat same structure for next days — NO comma after the last day.
+          ],
+          "name": "Place Name",
+          "description": "Short description of the place",
+          "image": "Add a real image URL that directly opens the image (no placeholders)"
+        }}
+        """
 
         return textwrap.dedent(prompt)
 
