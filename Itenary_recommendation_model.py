@@ -6,6 +6,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import ast
 import re
 import pickle
+import textwrap
 
 class ItenaryRecommendationSystem:
     def __init__(self, api_key):
@@ -355,110 +356,7 @@ class ItenaryRecommendationSystem:
         pass
 
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
-        prompt = """
-        You are a smart travel planning AI assistant.
-
-        Your task is to create a personalized multi-day travel itinerary using **only** the provided list of recommended places, based on the user's interests, travel preferences, and real data from the hotel and restaurant datasets.
-
-        ---
-
-        ### 🧑‍💼 **User Preferences**
-        - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
-        - Places of interest: {user_preferences['places_of_interest']}
-        - Travel group type: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
-        - Food preferences: {user_preferences['food_preferences']}
-        - User current location: {user_preferences['user_location']}
-        - Current travel month: {user_preferences['current_month']}
-        - Trip type: {user_preferences['trip_type']}
-        - Trip duration: {user_preferences['trip_duration']} days
-
-        ---
-
-        ### 📍 **Recommended Places List**
-        (Only these places should be used when creating the itinerary. Do not add extra places.)
-        {top_places}
-
-        ---
-
-        ### 🍽️ **Available Restaurants Dataset (Real Data Only)**
-        (Use this to recommend food options. No fake names. Match based on location & cuisine.)
-        {top_restaurants}
-
-        ---
-
-        ### 🏨 **Available Hotels Dataset (Real Data Only)**
-        (Use this to recommend where to stay each day. Do not make up hotels. Reuse hotels for nearby places when feasible.)
-        {top_hotels}
-
-        ---
-
-        ### ⚠️ **IMPORTANT RULES**
-
-        1. ✅ Use **only** the recommended places provided.
-        2. 🗓️ Create a {user_preferences['trip_duration']}-day itinerary.
-        3. 🚗 Each day should include **2–3 geographically close places** (optimize travel time).
-        4. ⏱️ For each place, mention **estimated time to spend** (e.g., 1.5–2 hours), considering activity type.
-        5. 🍽️ Suggest **2–3 restaurants per day** from the real dataset. Match with user's cuisine preferences.
-        6. 🏨 Suggest **2-3 hotel options per day** using real data. Try to suggest hotels of different ranges (low,mid,high).Reuse hotels where location makes sense. Try to suggest hotels of different ranges.
-        7. 💸 Provide **costs, ratings, and image links** for hotels/restaurants if available.
-        8. ⛔ Do NOT invent any new places.
-        9. 🔍 If **no restaurant data** is available in the dataset, suggest **popular local restaurants nearby** using your general knowledge.
-        10. 🏨 If **no hotel data** is available in the dataset, suggest **real, popular hotels nearby** using general knowledge or scraping-style info.
-        11. 🔁 Ensure there is **no repetition** of places across different days. Do **not loop back** to already visited locations.
-        12. 📍 For each place, clearly explain **why it was selected** (tie to user's activity interests, trip type, or convenience).
-        13. 🛫 On **first and last day**, prefer places and hotels **closer to the airport, railway station, or bus stop**.
-        14. 🔁 Avoid routes like A → B → A. Ensure a **linear flow** across days.
-        15. 🧠 Use your intelligence to structure the journey **optimally**, minimizing backtracking and maximizing user experience.
-
-        ---
-
-        ### 📤 **Output Format**
-
-        Return the final itinerary in **JSON format** using the structure below:
-
-        ```json
-        {
-        "itinerary": [
-            {
-            "day": 1,
-            "places_to_visit": [
-                {
-                "name": "Place Name",
-                "location": "City, State",
-                "reason": "** Matches your interest in [e.g. temple visits, nature, beach, etc.]",
-                "activities": Suggested Activities based on user interest [2–3 tailored activities],
-                "duration": "1.5–2 hours"
-                }
-            ],
-            "restaurants": [
-                {
-                "name": "Restaurant Name",
-                "cuisine": "Cuisine Type",
-                "approx_cost": "₹XXX",
-                "rating": "X.X",
-                "location": "City Area"
-                "reason": "** Matches you food preferences in  {user_preferences['food_preferences']}. Give reason why this restraunt is suggested to user"
-                }
-            ],
-            "hotels": [
-                {
-                "name": "Hotel Name",
-                "type": "Hotel Type",
-                "price_range": "₹XXX–XXX",
-                "rating": "X.X",
-                "location": "City",
-                "reason": " Near your visited places or transport hubs, suited for a {user_preferences['travel_group_type']} trip",
-                "link_or_image": "http://link-to-hotel-image-or-page.com"
-                }
-            ]
-            }
-            // Repeat for other days
-        ]
-        }
-        ```
-        
-        Ensure the JSON is valid and well-structured. Do not add any extra text or explanations outside the JSON format.
-        """
+        prompt = self.generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels)
         response = self.genai_model.generate_content(prompt)
         response_text = response.text
         response_text = response_text[7:]
@@ -467,6 +365,104 @@ class ItenaryRecommendationSystem:
 
         return response_text
 
+    def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
+        prompt = f"""
+        You are a smart AI that helps create a personalized multi-day travel itinerary.
+
+        Use only the information provided below: user preferences, recommended places, real restaurant and hotel datasets.
+
+        ---
+
+        ### 👤 User Preferences
+        - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
+        - Places of interest: {user_preferences['places_of_interest']}
+        - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
+        - Food preferences: {user_preferences['food_preferences']}
+        - Starting location: {user_preferences['user_location']}
+        - Travel month: {user_preferences['current_month']}
+        - Trip type: {user_preferences['trip_type']}
+        - Trip duration: {user_preferences['trip_duration']} days
+
+        ---
+
+        ### 📍 Recommended Places (Use only these!)
+        {top_places}
+
+        ---
+
+        ### 🍽️ Restaurants Dataset (Real data only)
+        {top_restaurants}
+
+        ---
+
+        ### 🏨 Hotels Dataset (Real data only)
+        {top_hotels}
+
+        ---
+
+        ### 🧠 Rules
+
+        1. Use ONLY the recommended places. No made-up locations.
+        2. Plan for {user_preferences['trip_duration']} days.
+        3. Each day: include 2–3 geographically close places.
+        4. For each place: give name, location, reason (based on user interest), activities, and estimated visit time (e.g. "1.5–2 hours").
+        5. Suggest 2–3 restaurants per day (match cuisine & location). Use only from dataset.
+        6. Suggest 2–3 hotels per day (low, mid, high range). Use real data.
+        7. For each restaurant/hotel: include name, type, cost, rating, location, reason for recommendation, and a link or image if available.
+        8. On Day 1 and final day, choose places/hotels closer to airport or station.
+        9. Don’t repeat places on different days.
+        10. Keep travel path linear (avoid A → B → A style).
+        11. If no data is available, suggest real known options using general knowledge (never invent fake names).
+
+        ---
+
+        ### 📦 Output Format (JSON)
+
+        {{
+        "itinerary": [
+            {{
+            "day": 1,
+            "places_to_visit": [
+                {{
+                "name": "Place Name",
+                "location": "City, State",
+                "reason": "Matches your interest in [e.g. temples, nature]",
+                "activities": ["Activity 1", "Activity 2"],
+                "duration": "1.5–2 hours"
+                }}
+            ],
+            "restaurants": [
+                {{
+                "name": "Restaurant Name",
+                "cuisine": "Cuisine Type",
+                "approx_cost": "₹XXX",
+                "rating": "X.X",
+                "location": "Area Name",
+                "reason": "Matches your food preference: {user_preferences['food_preferences']}"
+                }}
+            ],
+            "hotels": [
+                {{
+                "name": "Hotel Name",
+                "type": "Hotel Type",
+                "price_range": "₹XXX–XXX",
+                "rating": "X.X",
+                "location": "City",
+                "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
+                "link_or_image": "http://link-to-image-or-page.com"
+                }}
+            ]
+            }}
+            // Repeat for each day
+        ],
+        "name":"Place Name",
+        "description": "Add Short description about the place"
+        "image" :"Add image of the place. Add Image url which have some image and can be open (real image link only)"
+        }}
+        
+        }}
+        """
+        return textwrap.dedent(prompt)
 
 
     def _calculate_similarity_scores(self, text1, text2):
