@@ -415,7 +415,9 @@ class ItenaryRecommendationSystem:
         11. Keep travel path linear (avoid A → B → A style).
         12. If no data is available, suggest real known options using general knowledge (never invent fake names).
         13. Always return response in correct JSON format only (even if data is incomplete or days are fewer).
-        14. ⚠️ Do not add trailing commas or comments inside the JSON output.
+        14. Do not include any comments or markdown in the JSON response.
+        15. ❗ Do NOT include trailing commas — not after the last item in any array or after the last key in any object.
+        16. Final output must be 100% valid JSON. Strictly no broken format.
 
         ---
 
@@ -448,21 +450,22 @@ class ItenaryRecommendationSystem:
                 {{
                 "name": "Hotel Name",
                 "type": "Hotel Type",
-                "price_range": "Give price range as low, mid, high. Use your knowledge",
+                "price_range": "low | mid | high",
                 "rating": "X.X",
                 "location": "City",
                 "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
-                "link": "Add Page URL(pageurl) from hotel dataset. "
+                "link": "Add valid Page URL from hotel dataset"
                 }}
             ]
             }}
-            // Add more days only if data is available (no comma after last item)
+            // More days (same format) — only if data is available. Do NOT add a comma after the last day.
         ],
         "name": "Place Name",
-        "description": "Add short description about the place",
-        "image": "Add real image URL that opens directly (no placeholders or fake links)"
+        "description": "Short description of the place",
+        "image": "Add a real image URL that directly opens the image (no placeholders)"
         }}
         """
+
         return textwrap.dedent(prompt)
 
 
