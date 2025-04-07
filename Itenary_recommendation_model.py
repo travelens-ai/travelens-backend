@@ -415,6 +415,7 @@ class ItenaryRecommendationSystem:
         11. Keep travel path linear (avoid A → B → A style).
         12. If no data is available, suggest real known options using general knowledge (never invent fake names).
         13. Always return response in correct JSON format only (even if data is incomplete or days are fewer).
+        14. ⚠️ Do not add trailing commas or comments inside the JSON output.
 
         ---
 
@@ -455,7 +456,7 @@ class ItenaryRecommendationSystem:
                 }}
             ]
             }}
-            // Repeat for each day (only if data is available)
+            // Add more days only if data is available (no comma after last item)
         ],
         "name": "Place Name",
         "description": "Add short description about the place",
@@ -463,6 +464,7 @@ class ItenaryRecommendationSystem:
         }}
         """
         return textwrap.dedent(prompt)
+
 
 
     def _calculate_similarity_scores(self, text1, text2):
