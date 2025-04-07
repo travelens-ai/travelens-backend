@@ -402,6 +402,7 @@ class ItenaryRecommendationSystem:
 
         ### 🧠 Rules
 
+        0. Final output must be 100% valid JSON. Strictly no broken format.
         1. Use ONLY the recommended places. No made-up locations.
         2. Plan for up to {user_preferences['trip_duration']} days.
         3. If data is not available for all days, generate for fewer days (do not force full trip duration).
@@ -417,7 +418,8 @@ class ItenaryRecommendationSystem:
         13. Always return response in correct JSON format only (even if data is incomplete or days are fewer).
         14. Do not include any comments or markdown in the JSON response.
         15. ❗ Do NOT include trailing commas — not after the last item in any array or after the last key in any object.
-        16. Final output must be 100% valid JSON. Strictly no broken format.
+        16. Do not include hotel or restaurant if no data is available.
+        17. Do not include any extra information or explanations outside the JSON response.
 
         ---
 
@@ -454,7 +456,7 @@ class ItenaryRecommendationSystem:
                 "rating": "X.X",
                 "location": "City",
                 "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
-                "link": "Add valid Page URL from hotel dataset"
+                "link": "Add valid Page URL from hotel dataset {top_hotels['pageurl']}"
                 }}
             ]
             }}
