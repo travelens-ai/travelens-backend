@@ -448,11 +448,11 @@ class ItenaryRecommendationSystem:
                 {{
                 "name": "Hotel Name",
                 "type": "Hotel Type",
-                "price_range": "₹XXX–XXX",
+                "price_range": "Give price range as low, mid, high. Use your knowledge",
                 "rating": "X.X",
                 "location": "City",
                 "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
-                "link_or_image": "http://link-to-image-or-page.com"
+                "link": "Add Page URL(pageurl) from hotel dataset. "
                 }}
             ]
             }}
