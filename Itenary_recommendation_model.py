@@ -76,10 +76,6 @@ class ItenaryRecommendationSystem:
             self.restaurants_df = pd.read_csv('indian_restaurants.csv')
 
             print("Data loaded successfully.")
-            print("places Data Columns", self.places_df.columns)
-            print("hotels Data Columns", self.hotels_df.columns)
-            print("restaurants Data Columns", self.restaurants_df.columns)
-
             # Preprocess the places data
             self.places_df = self.preprocess_places_data(self.places_df)
 
@@ -361,7 +357,6 @@ class ItenaryRecommendationSystem:
         response_text = response.text
         response_text = response_text[7:]
         response_text = response_text[:-3]
-        # print(response_text)
 
         return response_text
 
