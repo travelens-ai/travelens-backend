@@ -1,0 +1,6 @@
+[
+  {
+    "pathList": ["deployment_values/"],
+    "pipelineName": "helm"
+  }
+]
