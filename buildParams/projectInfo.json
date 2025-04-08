@@ -1,0 +1,8 @@
+{
+  "project_name": "travelelns",
+  "project_type": "generic-docker",
+  "team_email": "mohit.prakash@glance.com",
+  "jira_project": "GLMONETIZN",
+  "branching_workflow": "github_flow",
+  "centralised_helm_flow": true
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "target": "gcr",
+    "server": "platformtools-prod-872a",
+    "type": "prod",
+    "path": "{{reponame}}/{{build-env}}",
+    "hostname": "gcr.io"
+  },
+
+  {
+    "target": "gcr",
+    "server": "platformtools-develop-015a",
+    "type": "dev",
+    "path": "{{reponame}}/{{build-env}}",
+    "hostname": "gcr.io"
+  }
+]
