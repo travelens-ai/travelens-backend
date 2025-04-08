@@ -1,0 +1,18 @@
+{
+  "delete_base_branch_on_merge": [
+    {
+      "base_branch": ".*",
+      "target_branch": "master"
+    }
+  ],
+  "create_git_tag": [],
+  "declared_binaries": [],
+  "branch_protection_rules": [
+    {
+      "base_branch": ".*",
+      "target_branch": "master",
+      "required_approving_review_count": 1,
+      "merge_method": "squash"
+    }
+  ]
+}
