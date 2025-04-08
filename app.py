@@ -18,7 +18,6 @@ def generate_itinerary():
     try:
         user_preferences = request.json
         result = recommender.generate_itinerary(user_preferences)
-        print("-------->",result)
         return  jsonify(result), 200
     except Exception as e:
         print(f"Error generating itinerary: {e}")
