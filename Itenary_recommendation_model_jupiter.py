@@ -231,13 +231,17 @@ class ItenaryRecommendationSystem:
                     'user_location': str,
                     'current_month': str,
                     'trip_type': str,
-                    'trip_duration': str
+                    'trip_duration': str,
+                    'suggested_places': list (optional)
                 }
 
         Returns:
             dict: Recommended itinerary with places, hotels, and restaurants
         """
         try:
+
+            # Ensure optional key doesn't raise a KeyError
+            user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
 
             # Get place recommendations
             places = self._get_place_recommendations(user_preferences)
@@ -259,9 +263,6 @@ class ItenaryRecommendationSystem:
             return {
                 'status': 'success',
                 'data': {
-                    # 'places': places,
-                    # 'hotels': hotels,
-                    # 'restaurants': restaurants,
                     'detailed_itinerary': itinerary,
                     'places': places.to_dict(orient='records')
                 }
@@ -399,6 +400,12 @@ class ItenaryRecommendationSystem:
 
     def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
         prompt = f"""
+        🚨 VERY IMPORTANT: You must follow the output format strictly. DO NOT modify, rename, add, or remove any key in the JSON structure below. 
+        For example: `approx_cost` ≠ `cost`, `place_name` ≠ `name`, `price_range` ≠ `budget`. 
+        Use the **exact keys** from the format shown — even a small change will break the output. This is the top priority rule.
+
+        --- 
+
         You are a smart AI that helps create a personalized multi-day travel itinerary.
 
         Use the information provided below: user preferences, recommended places, real restaurant and hotel datasets. 
@@ -415,6 +422,7 @@ class ItenaryRecommendationSystem:
         - Travel month: {user_preferences['current_month']}
         - Trip type: {user_preferences['trip_type']}
         - Trip duration: {user_preferences['trip_duration']} days
+        - Suggested places: {user_preferences['suggested_places']}
 
         ---
 
@@ -436,26 +444,28 @@ class ItenaryRecommendationSystem:
         ### 🧠 Rules
 
         1. The final output **must be 100% valid JSON**. Strictly no broken or partial JSON.
-        2. You **must generate exactly {user_preferences['trip_duration']} full days** in the itinerary — no more, no fewer. This is not negotiable.
-        3. If datasets do not have enough entries to cover all days, you **must use GenAI knowledge** to fill missing places, restaurants, or hotels.
-        4. Each day must include:
+        2. If `suggested_places` is empty or not provided, you **must generate exactly {user_preferences['trip_duration']} full days** in the itinerary — no more, no fewer. This is not negotiable.
+        3. You **must include all {user_preferences['suggested_places']} in the itinerary**. If including them increases the number of days, **extend the trip duration accordingly and generate the itinerary for the new total number of days**.
+        4. If datasets do not have enough entries to cover all days, you **must use GenAI knowledge** to fill missing places, restaurants, or hotels.
+        5. Each day must include:
           - 2–3 geographically close places to visit.
           - 2–3 restaurants (match cuisine and location).
           - 2–3 hotels (low, mid, and high budget options).
-        5. For each place, include:
+        6. For each place, include:
           - `name`, `location`, `reason`, `activities`, and estimated visit time (e.g., "1.5–2 hours").
-        6. For each restaurant, include:
+        7. For each restaurant, include:
           - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
-        7. For each hotel, include:
+        8. For each hotel, include:
           - `name`, `type`, `price_range`, `rating`, `location`, `reason`, and a `link` (either from dataset or generated if missing).
-        8. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
-        9. Avoid repeating places, hotels, or restaurants on different days.
-        10. Keep the travel flow linear — do not plan A → B → A routes.
-        11. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
-        12. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
-        13. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
-        14. Always generate a full response — no placeholder text like “TBD” or “N/A”.
-        15. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
+        9. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
+        10. Avoid repeating places, hotels, or restaurants on different days.
+        11. Keep the travel flow linear — do not plan A → B → A routes.
+        12. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
+        13. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
+        14. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
+        15. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        16. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
+          - places should be from indian_travel_places dataset
           - user’s `places_of_interest`
           - preferred activities
           - travel group type
@@ -494,7 +504,7 @@ class ItenaryRecommendationSystem:
                 {{
                   "name": "Hotel Name",
                   "type": "Hotel Type",
-                  "price_range": "low | mid | high",
+                  "price_range": "₹XXX", // show the price according to the price rang, low (1000 - 3000) | mid(3000 - 8000) | high(8000+)
                   "rating": "X.X",
                   "location": "City",
                   "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
@@ -506,15 +516,18 @@ class ItenaryRecommendationSystem:
           ],
           "name": "Place Name",
           "description": "Short description of the place",
-          "image": "Add a real image URL that directly opens the image (no placeholders)"
+          "image": "Add a real image URL that directly opens the image (no placeholders)",
+          "price_estimated_range": "give the total price range estimated per head. if not there then don't add the price_estimated_range"
           "similar_places": [
               {{
                 "place_name": "Alternative Destination 1",
-                "description": "Why this is a good fit based on user's preferences"
+                "description": "Why this is a good fit based on user's preferences",
+                "price_estimated_range": "give the total price range estimated per head. if not there then don't add the price_estimated_range"
               }},
               {{
                 "place_name": "Alternative Destination 2",
-                "description": "Why this is a good fit based on user's preferences"
+                "description": "Why this is a good fit based on user's preferences",
+                "price_estimated_range": "give the total price range estimated per head. if not there then don't add the price_estimated_range"
               }}
             ]
         }}
