@@ -1,15 +1,17 @@
+from flask import json
 import pandas as pd
-import numpy as np
 from sentence_transformers import SentenceTransformer
-import google.generativeai as genai
+# import google.generativeai as genai
 from sklearn.metrics.pairwise import cosine_similarity
 import ast
 import re
 import pickle
 import textwrap
-from vertexai.preview.language_models import ChatModel, InputOutputTextPair
+# from vertexai.preview.language_models import ChatModel, InputOutputTextPair
 from vertexai.preview.generative_models import GenerativeModel 
 import vertexai
+from numpy import dot
+from numpy.linalg import norm
 
 class ItenaryRecommendationSystem:
     def __init__(self, api_key):
@@ -109,11 +111,15 @@ class ItenaryRecommendationSystem:
                     activities = row['famous activities with rating'].keys()
                     for activity in activities:
                         if activity not in self.activity_embeddings:
-                            self.activity_embeddings[activity] = self.bert_model.encode([activity])[0]
+                            embedding = self.bert_model.encode([activity])[0]
+                            embedding = embedding / norm(embedding)  # normalize once
+                            self.activity_embeddings[activity] = embedding
                     
                     place_type = row['type']
                     if place_type not in self.place_type_embeddings:
-                        self.place_type_embeddings[place_type] = self.bert_model.encode([place_type])[0]
+                        embedding = self.bert_model.encode([place_type])[0]
+                        embedding = embedding / norm(embedding)  # normalize once
+                        self.place_type_embeddings[place_type] = embedding
                 
                 # Save embeddings to pickle files
                 with open('activity_embeddings.pkl', 'wb') as f:
@@ -159,41 +165,39 @@ class ItenaryRecommendationSystem:
 
     def compute_activity_score(self, activity_dict, user_activity_embedding):
         """Compute activity score based on user activity embedding"""
-        score = 0
-
            # Check if activity_dict is None or empty
         if not activity_dict:
             return 0
+        
+        score = 0.0
 
-        for activity, rating in activity_dict.items():
-            
+        for activity, rating in activity_dict.items():           
 
             if not activity:
                 continue
-            # Use cached embedding if available
-            if activity in self.activity_embeddings:
-                activity_embedding = self.activity_embeddings[activity]
-            else:
-                activity_embedding = self.bert_model.encode([activity])[0]
-                self.activity_embeddings[activity] = activity_embedding
-        
-            activity_embedding = self.bert_model.encode([activity])[0]
-            similarity = cosine_similarity([activity_embedding], [user_activity_embedding])[0][0]
+            # Use cached normalized embedding if available
+            activity_embedding = self.activity_embeddings.get(activity)
 
+            if activity_embedding is None:
+                # Fallback: compute and normalize if not cached
+                activity_embedding = self.bert_model.encode([activity])[0]
+                activity_embedding = activity_embedding / norm(activity_embedding)  # normalize once
+                self.activity_embeddings[activity] = activity_embedding
+
+            similarity = dot(activity_embedding, user_activity_embedding) 
             score += rating * similarity
 
         return score
 
     def compute_trip_type_score(self, place_type, user_trip_type_embedding):
         """Compute trip type score using BERT embeddings"""
-            # Use cached embedding if available
-        if place_type in self.place_type_embeddings:
-            place_type_embedding = self.place_type_embeddings[place_type]
-        else:
+        place_type_embedding = self.place_type_embeddings.get(place_type)
+        if place_type_embedding is None:
             place_type_embedding = self.bert_model.encode([place_type])[0]
+            place_type_embedding = place_type_embedding / norm(place_type_embedding)
             self.place_type_embeddings[place_type] = place_type_embedding
             
-        similarity = cosine_similarity([place_type_embedding], [user_trip_type_embedding])[0][0]
+        similarity = dot(place_type_embedding, user_trip_type_embedding)
         return similarity
 
     def weighted_place_rating(self, row, C):
@@ -258,7 +262,8 @@ class ItenaryRecommendationSystem:
                     # 'places': places,
                     # 'hotels': hotels,
                     # 'restaurants': restaurants,
-                    'detailed_itinerary': itinerary
+                    'detailed_itinerary': itinerary,
+                    'places': places.to_dict(orient='records')
                 }
             }
 
@@ -272,6 +277,7 @@ class ItenaryRecommendationSystem:
         """Get recommended places based on user preferences"""
         # generate user embedding
         user_embedding = self._generate_user_embedding(user_preferences)
+        user_embedding = user_embedding / norm(user_embedding)
 
         top_places = self.places_df
 
@@ -377,7 +383,7 @@ class ItenaryRecommendationSystem:
             content = response.candidates[0].content
             if content.parts:
                 text = content.parts[0].text
-                print("Generated Text:\n", text)
+                # print("Generated Text:\n", text)
             else:
                 print("⚠️ No text parts in content.")
         else:
@@ -389,7 +395,7 @@ class ItenaryRecommendationSystem:
         response_text = response_text[7:]
         response_text = response_text[:-3]
 
-        return response_text
+        return json.loads(response_text)
 
     def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
         prompt = f"""
