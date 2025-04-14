@@ -233,6 +233,7 @@ class ItenaryRecommendationSystem:
                     'trip_type': str,
                     'trip_duration': str,
                     'suggested_places': list (optional)
+                    'budget': str (optional)
                 }
 
         Returns:
@@ -242,6 +243,7 @@ class ItenaryRecommendationSystem:
 
             # Ensure optional key doesn't raise a KeyError
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
+            user_preferences['budget'] = user_preferences.get('budget', "")
 
             # Get place recommendations
             places = self._get_place_recommendations(user_preferences)
@@ -260,6 +262,18 @@ class ItenaryRecommendationSystem:
                 restaurants,
             )
 
+            mp = {}
+
+            for index, row in places.iterrows():
+                mp[row['placename']] = row['image']
+
+            place_name = itinerary['itinerary'][0]['places_to_visit'][0]['name']
+            print("=====>", mp, place_name)
+
+            # Check if the place_name exists in the mp dictionary
+            if place_name in mp:
+                itinerary['image'] = mp[place_name]
+
             return {
                 'status': 'success',
                 'data': {
@@ -268,7 +282,8 @@ class ItenaryRecommendationSystem:
                 }
             }
 
-        except Exception as e:
+        except (KeyError, IndexError, TypeError) as e:
+            print("Error while processing:", e)
             return {
                 'status': 'error',
                 'message': str(e)
@@ -281,6 +296,10 @@ class ItenaryRecommendationSystem:
         user_embedding = user_embedding / norm(user_embedding)
 
         top_places = self.places_df
+
+        top_places['image'] = top_places['image'].apply(
+            lambda x: x if isinstance(x, str) and x.endswith('.webp') else None
+        )
 
         # Calculate activity score for each place for user preferences
         top_places['activity_score'] = top_places['famous activities with rating'].apply(
@@ -396,6 +415,8 @@ class ItenaryRecommendationSystem:
         response_text = response_text[7:]
         response_text = response_text[:-3]
 
+
+
         return json.loads(response_text)
 
     def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
@@ -423,6 +444,7 @@ class ItenaryRecommendationSystem:
         - Trip type: {user_preferences['trip_type']}
         - Trip duration: {user_preferences['trip_duration']} days
         - Suggested places: {user_preferences['suggested_places']}
+        - Budget: {user_preferences['budget']}
 
         ---
 
@@ -455,8 +477,10 @@ class ItenaryRecommendationSystem:
           - `name`, `location`, `reason`, `activities`, and estimated visit time (e.g., "1.5–2 hours").
         7. For each restaurant, include:
           - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
+          - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
         8. For each hotel, include:
           - `name`, `type`, `price_range`, `rating`, `location`, `reason`, and a `link` (either from dataset or generated if missing).
+          - If user budget is available, ensure the hotel fits within the budget range: low (₹1000–₹3000), mid (₹3000–₹8000), high (₹8000+). If no budget is specified, select a range of hotel types.
         9. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
         10. Avoid repeating places, hotels, or restaurants on different days.
         11. Keep the travel flow linear — do not plan A → B → A routes.
@@ -464,7 +488,8 @@ class ItenaryRecommendationSystem:
         13. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
         14. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
         15. Always generate a full response — no placeholder text like “TBD” or “N/A”.
-        16. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
+        16. If budget is provided in the payload, ensure hotels and restaurants fall within it. Otherwise, choose budget automatically based on destination and travel group type.
+        17. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
           - places should be from indian_travel_places dataset
           - user’s `places_of_interest`
           - preferred activities
@@ -487,14 +512,14 @@ class ItenaryRecommendationSystem:
                   "location": "City, State",
                   "reason": "Matches your interest in [e.g. temples, nature]",
                   "activities": ["Activity 1", "Activity 2"],
-                  "duration": "1.5–2 hours"
+                  "duration": "1.5–2 hours",
                 }}
               ],
               "restaurants": [
                 {{
                   "name": "Restaurant Name",
                   "cuisine": "Cuisine Type",
-                  "approx_cost": "₹XXX",
+                  "approx_cost": "₹XXX", // if budget is given, match cost range accordingly; else choose normally
                   "rating": "X.X",
                   "location": "Area Name",
                   "reason": "Matches your food preference: {user_preferences['food_preferences']}"
@@ -504,7 +529,7 @@ class ItenaryRecommendationSystem:
                 {{
                   "name": "Hotel Name",
                   "type": "Hotel Type",
-                  "price_range": "₹XXX", // show the price according to the price rang, low (1000 - 3000) | mid(3000 - 8000) | high(8000+)
+                  "price_range": "₹XXX", // match this to budget: low (1000–3000) | mid (3000–8000) | high (8000+) — auto select if no budget
                   "rating": "X.X",
                   "location": "City",
                   "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
@@ -516,18 +541,22 @@ class ItenaryRecommendationSystem:
           ],
           "name": "Place Name",
           "description": "Short description of the place",
-          "image": "Add a real image URL that directly opens the image (no placeholders)",
-          "price_estimated_range": "give the total price range estimated per head. if not there then don't add the price_estimated_range"
+          "price_estimated_range": "give the total price range estimated per head. It should be in the range of ${user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
+          "state": "State Name",
           "similar_places": [
               {{
                 "place_name": "Alternative Destination 1",
                 "description": "Why this is a good fit based on user's preferences",
-                "price_estimated_range": "give the total price range estimated per head. if not there then don't add the price_estimated_range"
+                "state": "State Name",
+                "image": "{top_places['image']}" // image should come from {top_places} dataset. don't add image if not available. don't add any indexing or numbering in the image name.,
+                "price_estimated_range": "same logic as above"
               }},
               {{
                 "place_name": "Alternative Destination 2",
                 "description": "Why this is a good fit based on user's preferences",
-                "price_estimated_range": "give the total price range estimated per head. if not there then don't add the price_estimated_range"
+                "state": "State Name",
+                "image": "{top_places['image']}" // image should come from {top_places} dataset. don't add image if not available. don't add any indexing or numbering in the image name.,
+                "price_estimated_range": "same logic as above"
               }}
             ]
         }}

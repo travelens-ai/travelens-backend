@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from Itenary_recommendation_model_jupiter import ItenaryRecommendationSystem
+from generate_images import ImageGenerator
 import os
 import multiprocessing as mp
 from flask_cors import CORS
@@ -8,6 +9,7 @@ app = Flask(__name__)
 CORS(app)
 
 recommender = None  # global placeholder
+imageGenerator = None
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -26,6 +28,19 @@ def generate_itinerary():
             "message": str(e)
         }), 500
 
+@app.route('/generate-images', methods=['POST'])
+def generate_images():
+    try:
+        user_preferences = request.json
+        result = imageGenerator.getPlaces(user_preferences)
+        return jsonify(result), 200
+    except Exception as e:
+        print(f"Error generating itinerary: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 if __name__ == '__main__':
     # 🛡️ Safe multiprocessing for ONNX, transformers, etc.
     mp.set_start_method("spawn", force=True)
@@ -34,6 +49,8 @@ if __name__ == '__main__':
     api_key = os.getenv('GOOGLE_API_KEY', "AIzaSyDrsp2VLdY5q_ZztVQBfFS8AboxnYl9Aas")
     recommender = ItenaryRecommendationSystem(api_key=api_key)
     recommender.initialize()
+
+    imageGenerator = ImageGenerator()
 
     # 🚀 Dev mode with threading
     port = int(os.environ.get('PORT', 4000))
