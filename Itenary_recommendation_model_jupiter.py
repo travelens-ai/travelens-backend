@@ -1,5 +1,6 @@
 from flask import json
 import pandas as pd
+import requests
 from sentence_transformers import SentenceTransformer
 # import google.generativeai as genai
 from sklearn.metrics.pairwise import cosine_similarity
@@ -12,6 +13,15 @@ from vertexai.preview.generative_models import GenerativeModel
 import vertexai
 from numpy import dot
 from numpy.linalg import norm
+import schedule
+import time
+import threading
+from generate_images import ImageGenerator
+import os
+import random
+
+
+imageGenerator = ImageGenerator()
 
 class ItenaryRecommendationSystem:
     def __init__(self, api_key):
@@ -31,14 +41,105 @@ class ItenaryRecommendationSystem:
     def initialize(self):
         """Initialize models and load data"""
         try:
-            print("Initializing models and loading data...")
+            # Add the appropriate code here or remove the try block if           
             self._setup_models()
             print("Models initialized successfully.")
             self._load_data()
+            self.schedule_popular_destination()
+            self.schedule_similar_places()
+            # threading.Thread(target=self.schedule_popular_destination, daemon=True).start()
+            # threading.Thread(target=self.schedule_similar_places, daemon=True).start()
             return True
         except Exception as e:
             print(f"Initialization failed: {str(e)}")
             return False
+    
+    def schedule_similar_places(self):
+        self.update_similar_places()  # Trigger immediately for the first time
+        # schedule.every(1).hour.do(self.update_similar_places)
+        # while True:
+        #     schedule.run_pending()
+        #     time.sleep(1)
+        
+    def update_similar_places(self):
+        """Schedule the set_similar_places function to run every 1 day"""
+        try:
+            # Load similar_places.csv into a DataFrame
+            similar_places_df = pd.read_csv('similar_places.csv')
+
+            final_places = {}
+            for row in similar_places_df.itertuples(index=False):
+                final_places[row.placename] = row._asdict()      
+            # Save the DataFrame to a pickle file
+            with open('similar_places.pkl', 'wb') as f:
+                pickle.dump(final_places, f)
+
+            print("similar_places.pkl generated or updated successfully.")
+        except Exception as e:
+            print(f"Error generating or updating similar_places.pkl: {str(e)}")
+            
+    def schedule_popular_destination(self):
+        """Schedule the set_popular_destination function to run every 1 day"""
+        self.set_popular_destination()  # Trigger immediately for the first time
+        # schedule.every(1).day.do(self.set_popular_destination)
+        # while True:
+        #     schedule.run_pending()
+        #     time.sleep(1)
+
+    def set_popular_destination(self):
+        """Generate and save the most popular top 10 destinations"""
+        try:
+            # Calculate average rating for all places
+            C = self.places_df['rating'].mean()
+
+            # Calculate weighted rating score for each place
+            self.places_df['weighted_rating'] = self.places_df.apply(
+            lambda x: self.weighted_place_rating(x, C), axis=1
+            )
+
+            # Sort by weighted rating and select top 10 destinations
+            top_destinations = self.places_df.sort_values('weighted_rating', ascending=False).head(10)
+
+            # Replace NaN values with empty strings
+            top_destinations = top_destinations.fillna('')
+
+            # Remove previous data from the CSV file if it exists
+            with open('popular_destination.csv', 'w') as f:
+                f.truncate(0)
+
+            # Save the top destinations to a CSV file
+            top_destinations.to_csv('popular_destination.csv', index=False)
+
+            # Save the preprocessed DataFrame to a pickle file
+            with open('popular_destination.pkl', 'wb') as f:
+                pickle.dump(top_destinations, f)
+
+            print("Popular destinations saved successfully.")
+        except Exception as e:
+            print(f"Error generating popular destinations: {str(e)}")
+        
+    def get_popular_destination(self):
+        """Load the most popular top 10 destinations"""
+        try:
+            with open('popular_destination.pkl', 'rb') as f:
+                popular_destination = pickle.load(f)
+            return popular_destination.to_dict(orient='records')
+        except FileNotFoundError:
+            print("No popular destination found. Please run set_popular_destination() first.")
+            return None
+    
+    def get_similar_places(self):
+        try:
+            if os.path.exists('similar_places.pkl') and os.path.getsize('similar_places.pkl') > 0:
+                with open('similar_places.pkl', 'rb') as f:
+                    similar_places = pickle.load(f)
+                return similar_places
+            else:
+                print("similar_places.pkl is missing or empty.")
+                return {}
+        except FileNotFoundError:
+            print("No popular destination found. Please run set_popular_destination() first.")
+            return None
 
     def _setup_models(self):
         """Setup BERT and Gemini models"""
@@ -262,17 +363,52 @@ class ItenaryRecommendationSystem:
                 restaurants,
             )
 
-            mp = {}
+            # Merge places, popular destinations, and similar places into a single array
+            merged_places = []
+            merged_places.extend(places.to_dict(orient='records'))  # Convert DataFrame to list of dicts
+            popular_destinations = self.get_popular_destination()
+            if popular_destinations:
+                merged_places.extend(popular_destinations)
+            place_image_map = {}
 
-            for index, row in places.iterrows():
-                mp[row['placename']] = row['image']
+            for place in merged_places:
+                placename = place['placename']
+                image = place['image']
+                place_image_map[placename] = image
+            
+            placename = itinerary['name']
 
-            place_name = itinerary['itinerary'][0]['places_to_visit'][0]['name']
-            print("=====>", mp, place_name)
+            print("placenameplacename",placename,place_image_map)
+           
+            with open('similar_places.pkl', 'rb') as f:
+                similar_places_data = pickle.load(f)
+            if placename not in place_image_map and placename in similar_places_data:
+                place_image_map[placename] = similar_places_data.get(placename).get('image')
 
-            # Check if the place_name exists in the mp dictionary
-            if place_name in mp:
-                itinerary['image'] = mp[place_name]
+            if placename not in place_image_map:
+                place_image_map[placename] = 'default' + str(random.randint(1, 7)) + '.webp'
+
+            # Check if the placename exists in the mp dictionary
+            if placename in place_image_map:
+                itinerary['image'] = place_image_map[placename]
+
+            threading.Thread(target=self.save_similar_places, args=(itinerary['similar_places'],), daemon=True).start()
+
+            # Update similar_places with images from similar_places.pkl
+            try:
+                for place in itinerary['similar_places']:
+                    placename = place['placename']
+                    matching_place = similar_places_data.get(placename)
+                    if matching_place and pd.notna(matching_place['image']):
+                            place['image'] = matching_place['image']
+                    else:
+                        place['image'] = 'default' + str(random.randint(1, 7)) + '.webp'
+            except FileNotFoundError:
+                print("similar_places.pkl not found. Skipping image update for similar places.")
+
+            # Convert NaN values to empty strings using deep search
+            itinerary = json.loads(json.dumps(itinerary, default=lambda x: '' if pd.isna(x) else x))
+            places = places.fillna('')
 
             return {
                 'status': 'success',
@@ -403,7 +539,6 @@ class ItenaryRecommendationSystem:
             content = response.candidates[0].content
             if content.parts:
                 text = content.parts[0].text
-                # print("Generated Text:\n", text)
             else:
                 print("⚠️ No text parts in content.")
         else:
@@ -422,7 +557,7 @@ class ItenaryRecommendationSystem:
     def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
         prompt = f"""
         🚨 VERY IMPORTANT: You must follow the output format strictly. DO NOT modify, rename, add, or remove any key in the JSON structure below. 
-        For example: `approx_cost` ≠ `cost`, `place_name` ≠ `name`, `price_range` ≠ `budget`. 
+        For example: `approx_cost` ≠ `cost`, `placename` ≠ `name`, `price_range` ≠ `budget`. 
         Use the **exact keys** from the format shown — even a small change will break the output. This is the top priority rule.
 
         --- 
@@ -497,6 +632,7 @@ class ItenaryRecommendationSystem:
           - food preferences
           - user location (for budget-friendly or closer alternatives)
           - trip type (Beach, mountain, hill station, Religious site, Nature etc.)
+        18. Don't add NaN if any image or name is not available. Just leave it blank.
 
         ---
 
@@ -545,17 +681,15 @@ class ItenaryRecommendationSystem:
           "state": "State Name",
           "similar_places": [
               {{
-                "place_name": "Alternative Destination 1",
+                "placename": "Alternative Destination 1",
                 "description": "Why this is a good fit based on user's preferences",
                 "state": "State Name",
-                "image": "{top_places['image']}" // image should come from {top_places} dataset. don't add image if not available. don't add any indexing or numbering in the image name.,
                 "price_estimated_range": "same logic as above"
               }},
               {{
-                "place_name": "Alternative Destination 2",
+                "placename": "Alternative Destination 2",
                 "description": "Why this is a good fit based on user's preferences",
                 "state": "State Name",
-                "image": "{top_places['image']}" // image should come from {top_places} dataset. don't add image if not available. don't add any indexing or numbering in the image name.,
                 "price_estimated_range": "same logic as above"
               }}
             ]
@@ -563,6 +697,55 @@ class ItenaryRecommendationSystem:
         """
 
         return textwrap.dedent(prompt)
+
+
+    def save_similar_places(self, similar_places):
+        csv_file = 'similar_places.csv'
+        try:
+            existing_df = pd.read_csv(csv_file)
+        except FileNotFoundError:
+            existing_df = pd.DataFrame(columns=['placename', 'description', 'state', 'image', 'price_estimated_range'])
+
+        for place in similar_places:
+            placename = place['placename']
+            # Check if it's a new place or missing image
+            if placename not in existing_df['placename'].values or not place.get('image'):
+                try:
+                    # Generate and save image
+                    image_path = imageGenerator.generate_and_save_image(placename)
+                    
+                    # Upload image
+                    with open(image_path, 'rb') as image_file:
+                        response = requests.post(
+                            "https://www.ultrazynix.com/travelens/upload.php",
+                            files={'file': image_file}
+                        )
+                        if response.status_code == 200:
+                            res = response.json()
+                            place['image'] = res['path']
+                        else:
+                            place['image'] = ''
+                except Exception as e:
+                    print(f"Error generating or uploading image for {placename}: {str(e)}")
+                    place['image'] = ''
+
+        try:
+            similar_places_df = pd.DataFrame(similar_places)
+            # Ensure 'image' column has no NaNs or Nones
+            similar_places_df['image'] = similar_places_df['image'].fillna('').replace({None: ''})
+
+            # Filter out places already present
+            new_places_df = similar_places_df[~similar_places_df['placename'].isin(existing_df['placename'])]
+
+            # ✅ Save only if new data is available
+            if not new_places_df.empty:
+                updated_df = pd.concat([existing_df, new_places_df], ignore_index=True)
+                updated_df.to_csv(csv_file, index=False)
+                self.update_similar_places()
+            else:
+                print("No new similar places to update.")
+        except Exception as e:
+            print(f"Error saving similar places to CSV: {str(e)}")
 
 
 
