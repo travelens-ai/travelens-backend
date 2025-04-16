@@ -469,7 +469,7 @@ class ItenaryRecommendationSystem:
           ],
           "name": "Place Name",
           "description": "Short description of the place",
-          "image": "Add a real image URL that directly opens the image (no placeholders)"
+          "image": "image url should be in this format 'https://www.ultrazynix.com/travelens/generated_images/top_places.image'", // top_places.image should be the column of top_places dataframe
           "similar_places": [
               {{
                 "place_name": "Alternative Destination 1",
