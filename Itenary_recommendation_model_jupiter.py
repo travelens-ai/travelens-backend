@@ -316,7 +316,36 @@ class ItenaryRecommendationSystem:
 
     def normalize(self, text):
         return re.sub(r'[^\w\s]', '', str(text).lower().strip())
+    
+    def getEditPlaces(self, city, state):
 
+        # Step 1: Try to match on city first
+        edit_places = self.places_df[
+            self.places_df['city'].str.lower() == city.lower()
+        ]
+
+        if edit_places.empty:
+            # If no city matches, fall back to matching by state
+            edit_places = self.places_df[
+                self.places_df['state'].str.lower() == state.lower()
+            ]
+
+
+        # Calculate average rating for all restaurants (or set a constant)
+        C = edit_places['rating'].mean()
+
+        # Calculate weighted rating score for each place for user preferences
+        edit_places['rating_score'] = edit_places.apply(
+            lambda x: self.weighted_place_rating(x, C), axis=1
+        )
+
+        # Sort places by final score in descending order
+        edit_place_recommendation = edit_places.sort_values('rating_score', ascending=False)
+
+        print("edit_place_recommendation", edit_place_recommendation)
+
+        return edit_place_recommendation.head(20)
+    
     def generate_itinerary(self, user_preferences):
         """
         Generate travel itinerary based on user preferences
@@ -363,6 +392,8 @@ class ItenaryRecommendationSystem:
                 restaurants,
             )
 
+            if places.empty:
+                places = self.getEditPlaces(itinerary['city'] , itinerary['state'])
             # Merge places, popular destinations, and similar places into a single array
             merged_places = []
             merged_places.extend(places.to_dict(orient='records'))  # Convert DataFrame to list of dicts
@@ -372,9 +403,10 @@ class ItenaryRecommendationSystem:
             place_image_map = {}
 
             for place in merged_places:
-                placename = place['placename']
-                image = place['image']
-                place_image_map[placename] = image
+                if(pd.notna(place['image'])):
+                    placename = place['placename']
+                    image = place['image']
+                    place_image_map[placename] = image
             
             placename = itinerary['name']
 
@@ -389,7 +421,7 @@ class ItenaryRecommendationSystem:
                 place_image_map[placename] = 'default' + str(random.randint(1, 7)) + '.webp'
 
             # Check if the placename exists in the mp dictionary
-            if placename in place_image_map:
+            if placename in place_image_map and pd.notna(place_image_map[placename]):
                 itinerary['image'] = place_image_map[placename]
 
             threading.Thread(target=self.save_similar_places, args=(itinerary['similar_places'],), daemon=True).start()
@@ -449,11 +481,25 @@ class ItenaryRecommendationSystem:
 
         preferred_location = user_preferences["places_of_interest"].lower()
 
-        # Primary Recommendations on State and City (Exact Match)
-        top_places = top_places[
-            top_places['city'].str.lower().str.contains(preferred_location.lower(), na=False) |
-            top_places['state'].str.lower().str.contains(preferred_location.lower(), na=False)
+        # Split the preferred_location on comma and strip spaces
+        location_parts = [part.strip() for part in preferred_location.split(",")]
+
+        # Step 1: Try to match on city first
+        city_matches = top_places[
+            top_places['city'].str.lower().apply(
+                lambda city: any(part in str(city).lower() for part in location_parts)
+            )
         ]
+
+        if not city_matches.empty:
+            # If there are city matches, use them only
+            top_places = city_matches
+        else:
+            # Otherwise fall back to matching by state
+            top_places = top_places[
+                top_places['state'].str.lower().apply(
+                    lambda state: any(part in state.lower() for part in location_parts) )
+            ]
 
         # Calculate average rating for all restaurants (or set a constant)
         C = top_places['rating'].mean()
@@ -523,8 +569,6 @@ class ItenaryRecommendationSystem:
         return top_restaurants.head(100)
 
 
-        # Implementation for restaurant recommendations
-        pass
 
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
         prompt = self.generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels)
@@ -679,6 +723,7 @@ class ItenaryRecommendationSystem:
           "description": "Short description of the place",
           "price_estimated_range": "give the total price range estimated per head. It should be in the range of ${user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
           "state": "State Name",
+          "city": "City Name",
           "similar_places": [
               {{
                 "placename": "Alternative Destination 1",

@@ -40,18 +40,6 @@ def get_popular_destination():
             "message": str(e)
         }), 500
 
-@app.route('/generate-images', methods=['POST'])
-def generate_images():
-    try:
-        user_preferences = request.json
-        result = imageGenerator.getPlaces(user_preferences)
-        return jsonify(result), 200
-    except Exception as e:
-        print(f"Error generating itinerary: {e}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
 
 @app.route('/generate-images', methods=['POST'])
 def generate_images():
