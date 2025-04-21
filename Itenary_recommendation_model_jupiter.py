@@ -249,7 +249,7 @@ class ItenaryRecommendationSystem:
         )
         return df
 
-    def merge_activities(self, activities):
+    def merge_list(self, activities):
         """Merge activities with commas and 'and' before the last one."""
         if len(activities) == 0:
             return ""  # Handle empty list
@@ -259,7 +259,7 @@ class ItenaryRecommendationSystem:
 
     def _generate_user_embedding(self, user_preferences):
         """Generate user embedding based on user preferences"""
-        query = 'The user is interested in ' + self.merge_activities(user_preferences['preferred_activities'])
+        query = 'The user prefers trips focused on ' + user_preferences['trip_type'] + '. They are also interested in activities such as ' + self.merge_list(user_preferences['preferred_activities']) + '.'
         user_activity_embedding = self.bert_model.encode([query])[0]
         # Implement user embedding generation logic here
         return user_activity_embedding
