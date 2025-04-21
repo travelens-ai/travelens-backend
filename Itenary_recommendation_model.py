@@ -472,11 +472,11 @@ class ItenaryRecommendationSystem:
           "image": "image url should be in this format 'https://www.ultrazynix.com/travelens/generated_images/top_places.image'", // top_places.image should be the column of top_places dataframe
           "similar_places": [
               {{
-                "place_name": "Alternative Destination 1",
+                "placename": "Alternative Destination 1",
                 "description": "Why this is a good fit based on user's preferences"
               }},
               {{
-                "place_name": "Alternative Destination 2",
+                "placename": "Alternative Destination 2",
                 "description": "Why this is a good fit based on user's preferences"
               }}
             ]
