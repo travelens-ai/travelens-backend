@@ -4,3 +4,6 @@
 # Ignore Python cache directories
 __pycache__/
 generated_images
+
+# Environment variables
+.env

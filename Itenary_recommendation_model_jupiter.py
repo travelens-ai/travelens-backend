@@ -157,8 +157,8 @@ class ItenaryRecommendationSystem:
         # Setup Gemini
         try:
             print("Configuring Google Generative AI...")
-            project_id = "glanceai-prod-5aea"
-            location = "us-central1"
+            project_id = os.getenv('GCP_PROJECT_ID')
+            location = os.getenv('GCP_LOCATION')
 
             vertexai.init(project=project_id, location=location)
 
