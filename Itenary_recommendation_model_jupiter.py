@@ -1,15 +1,13 @@
 from flask import json
 import pandas as pd
 import requests
-from sentence_transformers import SentenceTransformer
-# import google.generativeai as genai
-from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 import ast
 import re
 import pickle
 import textwrap
-# from vertexai.preview.language_models import ChatModel, InputOutputTextPair
-from vertexai.preview.generative_models import GenerativeModel 
+from vertexai.preview.generative_models import GenerativeModel
+from vertexai.language_models import TextEmbeddingModel
 import vertexai
 from numpy import dot
 from numpy.linalg import norm
@@ -33,7 +31,7 @@ class ItenaryRecommendationSystem:
         """
         self.api_key = api_key
         self.genai_model = None
-        self.bert_model = None
+        self.embedding_model = None
         self.places_df = None
         self.hotels_df = None
         self.restaurants_df = None
@@ -141,24 +139,26 @@ class ItenaryRecommendationSystem:
             print("No popular destination found. Please run set_popular_destination() first.")
             return None
 
+    def _encode(self, texts):
+        embeddings = self.embedding_model.get_embeddings(texts)
+        return [np.array(e.values) for e in embeddings]
+
     def _setup_models(self):
-        """Setup BERT and Gemini models"""
-        # Setup BERT
+        """Setup Vertex AI embedding and Gemini models"""
         try:
-            # Setup BERT
-            print("Initializing SentenceTransformer...")
-            self.bert_model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("SentenceTransformer initialized successfully.")
+            print("Initializing Vertex AI TextEmbeddingModel...")
+            self.embedding_model = TextEmbeddingModel.from_pretrained("text-embedding-005")
+            print("TextEmbeddingModel initialized successfully.")
         except Exception as e:
-            print(f"Error initializing SentenceTransformer: {str(e)}")
+            print(f"Error initializing TextEmbeddingModel: {str(e)}")
             raise
 
 
         # Setup Gemini
         try:
             print("Configuring Google Generative AI...")
-            project_id = "glanceai-prod-5aea"
-            location = "us-central1"
+            project_id = os.getenv('GCP_PROJECT_ID')
+            location = os.getenv('GCP_LOCATION')
 
             vertexai.init(project=project_id, location=location)
 
@@ -207,21 +207,31 @@ class ItenaryRecommendationSystem:
                 print("Loaded existing embeddings from pickle files")
             except FileNotFoundError:
                 print("Generating new embeddings...")
-                # Generate embeddings for activities
+                # Collect unique activities and place types
+                all_activities = set()
+                all_place_types = set()
                 for _, row in self.places_df.iterrows():
                     activities = row['famous activities with rating'].keys()
-                    for activity in activities:
-                        if activity not in self.activity_embeddings:
-                            embedding = self.bert_model.encode([activity])[0]
-                            embedding = embedding / norm(embedding)  # normalize once
-                            self.activity_embeddings[activity] = embedding
-                    
-                    place_type = row['type']
-                    if place_type not in self.place_type_embeddings:
-                        embedding = self.bert_model.encode([place_type])[0]
-                        embedding = embedding / norm(embedding)  # normalize once
-                        self.place_type_embeddings[place_type] = embedding
-                
+                    all_activities.update(activities)
+                    all_place_types.add(row['type'])
+
+                # Batch encode activities (API supports up to 250 per call)
+                activity_list = list(all_activities)
+                for i in range(0, len(activity_list), 200):
+                    batch = activity_list[i:i+200]
+                    embeddings = self._encode(batch)
+                    for text, emb in zip(batch, embeddings):
+                        self.activity_embeddings[text] = emb / norm(emb)
+                    print(f"  Encoded activities {i+1}-{min(i+200, len(activity_list))} of {len(activity_list)}")
+
+                # Batch encode place types
+                place_type_list = list(all_place_types)
+                for i in range(0, len(place_type_list), 200):
+                    batch = place_type_list[i:i+200]
+                    embeddings = self._encode(batch)
+                    for text, emb in zip(batch, embeddings):
+                        self.place_type_embeddings[text] = emb / norm(emb)
+
                 # Save embeddings to pickle files
                 with open('activity_embeddings.pkl', 'wb') as f:
                     pickle.dump(self.activity_embeddings, f)
@@ -260,7 +270,7 @@ class ItenaryRecommendationSystem:
     def _generate_user_embedding(self, user_preferences):
         """Generate user embedding based on user preferences"""
         query = 'The user prefers trips focused on ' + user_preferences['trip_type'] + '. They are also interested in activities such as ' + self.merge_list(user_preferences['preferred_activities']) + '.'
-        user_activity_embedding = self.bert_model.encode([query])[0]
+        user_activity_embedding = self._encode([query])[0]
         # Implement user embedding generation logic here
         return user_activity_embedding
 
@@ -281,7 +291,7 @@ class ItenaryRecommendationSystem:
 
             if activity_embedding is None:
                 # Fallback: compute and normalize if not cached
-                activity_embedding = self.bert_model.encode([activity])[0]
+                activity_embedding = self._encode([activity])[0]
                 activity_embedding = activity_embedding / norm(activity_embedding)  # normalize once
                 self.activity_embeddings[activity] = activity_embedding
 
@@ -294,7 +304,7 @@ class ItenaryRecommendationSystem:
         """Compute trip type score using BERT embeddings"""
         place_type_embedding = self.place_type_embeddings.get(place_type)
         if place_type_embedding is None:
-            place_type_embedding = self.bert_model.encode([place_type])[0]
+            place_type_embedding = self._encode([place_type])[0]
             place_type_embedding = place_type_embedding / norm(place_type_embedding)
             self.place_type_embeddings[place_type] = place_type_embedding
             
@@ -795,10 +805,12 @@ class ItenaryRecommendationSystem:
 
 
     def _calculate_similarity_scores(self, text1, text2):
-        """Calculate similarity between two texts using BERT embeddings"""
-        embedding1 = self.bert_model.encode([text1])[0]
-        embedding2 = self.bert_model.encode([text2])[0]
-        return cosine_similarity([embedding1], [embedding2])[0][0]
+        """Calculate similarity between two texts using embeddings"""
+        embedding1 = self._encode([text1])[0]
+        embedding1 = embedding1 / norm(embedding1)
+        embedding2 = self._encode([text2])[0]
+        embedding2 = embedding2 / norm(embedding2)
+        return dot(embedding1, embedding2)
 
     @staticmethod
     def _validate_user_preferences(preferences):

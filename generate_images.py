@@ -4,6 +4,9 @@ from PIL import Image
 import os
 from io import BytesIO
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Create output folder if it doesn't exist
 output_dir = "generated_images"
@@ -14,7 +17,7 @@ class ImageGenerator:
     places_df = None
     
     def __init__(self):
-        vertexai.init(project="glanceai-prod-5aea", location="us-central1")
+        vertexai.init(project=os.getenv('GCP_PROJECT_ID'), location=os.getenv('GCP_LOCATION'))
         self.generation_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
 
     def getPlaces(self, user_preferences: dict):

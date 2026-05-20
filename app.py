@@ -4,6 +4,9 @@ from generate_images import ImageGenerator
 import os
 import multiprocessing as mp
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -59,7 +62,7 @@ if __name__ == '__main__':
     mp.set_start_method("spawn", force=True)
 
     # ✅ Initialize recommender inside __main__ (safe zone)
-    api_key = os.getenv('GOOGLE_API_KEY', "AIzaSyDrsp2VLdY5q_ZztVQBfFS8AboxnYl9Aas")
+    api_key = os.getenv('GOOGLE_API_KEY')
     recommender = ItenaryRecommendationSystem(api_key=api_key)
     recommender.initialize()
 
