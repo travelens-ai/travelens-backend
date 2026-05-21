@@ -1,5 +1,5 @@
-from vertexai.preview.vision_models import ImageGenerationModel
-import vertexai
+from google import genai
+from google.genai import types
 from PIL import Image
 import os
 from io import BytesIO
@@ -17,8 +17,7 @@ class ImageGenerator:
     places_df = None
     
     def __init__(self):
-        vertexai.init(project=os.getenv('GCP_PROJECT_ID'), location=os.getenv('GCP_LOCATION'))
-        self.generation_model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-002")
+        self.genai_client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
 
     def getPlaces(self, user_preferences: dict):
         places_df = pd.read_csv("indian_travel_places.csv")
@@ -43,21 +42,22 @@ class ImageGenerator:
 
     def generate_and_save_image(self, place: str) -> str:
         try:
-            images = self.generation_model.generate_images(
+            response = self.genai_client.models.generate_images(
+                model='imagen-3.0-generate-002',
                 prompt=f"Generate an image of a place {place} to display on a travel itinerary",
-                number_of_images=1,
-                aspect_ratio="16:9",
-                negative_prompt="",
-                person_generation="",
-                safety_filter_level="",
-                add_watermark=True,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio="16:9",
+                    add_watermark=True,
+                ),
             )
 
-            if not images:
+            if not response.generated_images:
                 print("No image generated.")
                 return ""
 
-            pil_image = images[0]._pil_image
+            img_bytes = response.generated_images[0].image.image_bytes
+            pil_image = Image.open(BytesIO(img_bytes))
             pil_image = pil_image.resize((640, 360))
 
             buffer = BytesIO()

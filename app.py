@@ -11,8 +11,10 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-recommender = None  # global placeholder
-imageGenerator = None
+api_key = os.getenv('GOOGLE_API_KEY')
+recommender = ItenaryRecommendationSystem(api_key=api_key)
+recommender.initialize()
+imageGenerator = ImageGenerator()
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -58,16 +60,6 @@ def generate_images():
         }), 500
 
 if __name__ == '__main__':
-    # 🛡️ Safe multiprocessing for ONNX, transformers, etc.
     mp.set_start_method("spawn", force=True)
-
-    # ✅ Initialize recommender inside __main__ (safe zone)
-    api_key = os.getenv('GOOGLE_API_KEY')
-    recommender = ItenaryRecommendationSystem(api_key=api_key)
-    recommender.initialize()
-
-    imageGenerator = ImageGenerator()
-
-    # 🚀 Dev mode with threading
     port = int(os.environ.get('PORT', 4000))
     app.run(host='0.0.0.0', port=port, threaded=True)

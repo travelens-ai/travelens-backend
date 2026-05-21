@@ -6,9 +6,8 @@ import ast
 import re
 import pickle
 import textwrap
-from vertexai.preview.generative_models import GenerativeModel
-from vertexai.language_models import TextEmbeddingModel
-import vertexai
+from google import genai
+from google.genai import types
 from numpy import dot
 from numpy.linalg import norm
 import schedule
@@ -19,8 +18,6 @@ import os
 import random
 
 
-imageGenerator = ImageGenerator()
-
 class ItenaryRecommendationSystem:
     def __init__(self, api_key):
         """
@@ -30,6 +27,7 @@ class ItenaryRecommendationSystem:
             api_key (str): Google Generative AI API key
         """
         self.api_key = api_key
+        self.genai_client = genai.Client(api_key=api_key)
         self.genai_model = None
         self.embedding_model = None
         self.places_df = None
@@ -140,47 +138,25 @@ class ItenaryRecommendationSystem:
             return None
 
     def _encode(self, texts):
-        embeddings = self.embedding_model.get_embeddings(texts)
-        return [np.array(e.values) for e in embeddings]
+        result = self.genai_client.models.embed_content(
+            model='text-embedding-005',
+            contents=texts,
+        )
+        return [np.array(e.values) for e in result.embeddings]
 
     def _setup_models(self):
-        """Setup Vertex AI embedding and Gemini models"""
+        """Setup Google AI embedding and Gemini models"""
         try:
-            print("Initializing Vertex AI TextEmbeddingModel...")
-            self.embedding_model = TextEmbeddingModel.from_pretrained("text-embedding-005")
-            print("TextEmbeddingModel initialized successfully.")
+            print("Configuring Google AI client...")
+            self.gemini_model_name = "gemini-2.0-flash-001"
+            self.generation_config = types.GenerateContentConfig(
+                max_output_tokens=8192,
+                temperature=0.5,
+                top_p=0.5,
+            )
+            print("Google AI client configured successfully.")
         except Exception as e:
-            print(f"Error initializing TextEmbeddingModel: {str(e)}")
-            raise
-
-
-        # Setup Gemini
-        try:
-            print("Configuring Google Generative AI...")
-            project_id = os.getenv('GCP_PROJECT_ID')
-            location = os.getenv('GCP_LOCATION')
-
-            vertexai.init(project=project_id, location=location)
-
-            # Load the Gemini model
-            model_name = "gemini-2.0-flash-001"
-            self.gemini_model = GenerativeModel(model_name)
-
-            # Define parameters
-            self.generation_config = {
-                "max_output_tokens": 8192,
-                "temperature": 0.5,
-                "top_p": 0.5,
-            }
-            # Prompt the model
-            # response = self.gemini_model.generate_content(
-            #     "Hey exaplin who are you",
-            #     generation_config=self.generation_config
-            # )
-    
-            print("Google Generative AI configured successfully.")
-        except Exception as e:
-            print(f"Error configuring Google Generative AI: {str(e)}")
+            print(f"Error configuring Google AI: {str(e)}")
             raise
 
     def _load_data(self):
@@ -584,9 +560,10 @@ class ItenaryRecommendationSystem:
         prompt = self.generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels)
         
                 # Prompt the model
-        response = self.gemini_model.generate_content(
-            prompt,
-            generation_config=self.generation_config
+        response = self.genai_client.models.generate_content(
+            model=self.gemini_model_name,
+            contents=prompt,
+            config=self.generation_config,
         )
         
         if response.candidates:
