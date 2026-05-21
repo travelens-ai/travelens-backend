@@ -1,0 +1,37 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://x-in.tv.glanceapis.com/:path*"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "https://accounts.glance.com/:path*"
+    },
+    {
+      "source": "/ai-looks/:path*",
+      "destination": "https://api.ailooks.tv.glance.com/:path*"
+    },
+    {
+      "source": "/ads/:path*",
+      "destination": "https://glance-tv-staging.glance.inmobi.com/api/v1/ads/:path*"
+    },
+    {
+      "source": "/weather/:path*",
+      "destination": "https://glance-tv-staging.glance.inmobi.com/:path*"
+    },
+    {
+      "source": "/shortener/:path*",
+      "destination": "https://x-in.tv.glanceapis.com/:path*"
+    },
+    {
+      "source": "/grpc/:path*",
+      "destination": "https://google-gtv-in.spaces.glanceapis.com/:path*"
+    },
+    {
+      "source": "/analytics/:path*",
+      "destination": "https://snapshot-collector.staging.glanceapis.com/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
