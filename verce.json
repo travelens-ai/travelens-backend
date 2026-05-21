@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://x-in.tv.glanceapis.com/:path*"
+      "destination": "https://accounts.glance.com/:path*"
     },
     {
       "source": "/auth/:path*",
