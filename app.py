@@ -15,6 +15,7 @@ api_key = os.getenv('GOOGLE_API_KEY')
 recommender = ItenaryRecommendationSystem(api_key=api_key)
 recommender.initialize()
 imageGenerator = ImageGenerator()
+recommender.image_generator = imageGenerator
 
 @app.route('/health', methods=['GET'])
 def health_check():

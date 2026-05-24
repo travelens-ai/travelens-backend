@@ -28,6 +28,7 @@ class ItenaryRecommendationSystem:
         """
         self.api_key = api_key
         self.genai_client = genai.Client(api_key=api_key)
+        self.image_generator = None
         self.genai_model = None
         self.embedding_model = None
         self.places_df = None
@@ -744,7 +745,7 @@ class ItenaryRecommendationSystem:
             if placename not in existing_df['placename'].values or not place.get('image'):
                 try:
                     # Generate and save image
-                    image_path = imageGenerator.generate_and_save_image(placename)
+                    image_path = self.image_generator.generate_and_save_image(placename)
                     
                     # Upload image
                     with open(image_path, 'rb') as image_file:
