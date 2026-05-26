@@ -67,6 +67,16 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5C35D154F9844D299E71189AF740ACCB }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_63F0743D371844D99BB8B6B45CA1479F }}
 
+      - name: Set container startup timeout
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            RG=$(az webapp show --name travelens-api --query resourceGroup -o tsv)
+            az webapp config appsettings set \
+              --name travelens-api \
+              --resource-group $RG \
+              --settings WEBSITES_CONTAINER_START_TIME_LIMIT=1800
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
