@@ -71,7 +71,7 @@ jobs:
         uses: azure/CLI@v2
         with:
           inlineScript: |
-            RG=$(az webapp show --name travelens-api --query resourceGroup -o tsv)
+            RG=$(az webapp list --query "[?name=='travelens-api'].resourceGroup" -o tsv)
             az webapp config appsettings set \
               --name travelens-api \
               --resource-group $RG \
