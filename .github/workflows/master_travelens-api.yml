@@ -68,6 +68,7 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_63F0743D371844D99BB8B6B45CA1479F }}
 
       - name: Set container startup timeout
+        continue-on-error: true
         uses: azure/CLI@v2
         with:
           inlineScript: |
