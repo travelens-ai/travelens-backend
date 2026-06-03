@@ -6,8 +6,7 @@ import ast
 import re
 import pickle
 import textwrap
-from google import genai
-from google.genai import types
+from openai import AzureOpenAI
 from numpy import dot
 from numpy.linalg import norm
 import schedule
@@ -19,18 +18,19 @@ import random
 
 
 class ItenaryRecommendationSystem:
-    def __init__(self, api_key):
+    def __init__(self, client, chat_deployment, embedding_deployment):
         """
         Initialize the Itinerary Recommendation System
 
         Args:
-            api_key (str): Google Generative AI API key
+            client (AzureOpenAI): Azure OpenAI client instance
+            chat_deployment (str): Azure deployment name for chat/completion model
+            embedding_deployment (str): Azure deployment name for embedding model
         """
-        self.api_key = api_key
-        self.genai_client = genai.Client(api_key=api_key)
+        self.client = client
+        self.chat_deployment = chat_deployment
+        self.embedding_deployment = embedding_deployment
         self.image_generator = None
-        self.genai_model = None
-        self.embedding_model = None
         self.places_df = None
         self.hotels_df = None
         self.restaurants_df = None
@@ -139,25 +139,22 @@ class ItenaryRecommendationSystem:
             return None
 
     def _encode(self, texts):
-        result = self.genai_client.models.embed_content(
-            model='text-embedding-005',
-            contents=texts,
+        result = self.client.embeddings.create(
+            model=self.embedding_deployment,
+            input=texts,
         )
-        return [np.array(e.values) for e in result.embeddings]
+        return [np.array(e.embedding) for e in result.data]
 
     def _setup_models(self):
-        """Setup Google AI embedding and Gemini models"""
+        """Setup Azure OpenAI models"""
         try:
-            print("Configuring Google AI client...")
-            self.gemini_model_name = "gemini-2.0-flash-001"
-            self.generation_config = types.GenerateContentConfig(
-                max_output_tokens=8192,
-                temperature=0.5,
-                top_p=0.5,
-            )
-            print("Google AI client configured successfully.")
+            print("Configuring Azure OpenAI client...")
+            self.max_tokens = 8192
+            self.temperature = 0.5
+            self.top_p = 0.5
+            print("Azure OpenAI client configured successfully.")
         except Exception as e:
-            print(f"Error configuring Google AI: {str(e)}")
+            print(f"Error configuring Azure OpenAI: {str(e)}")
             raise
 
     def _load_data(self):
@@ -559,30 +556,22 @@ class ItenaryRecommendationSystem:
 
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
         prompt = self.generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels)
-        
-                # Prompt the model
-        response = self.genai_client.models.generate_content(
-            model=self.gemini_model_name,
-            contents=prompt,
-            config=self.generation_config,
+        print(f"Prompt length: {len(prompt)} chars")
+
+        response = self.client.responses.create(
+            model=self.chat_deployment,
+            input=[{"role": "user", "content": prompt}],
         )
-        
-        if response.candidates:
-            content = response.candidates[0].content
-            if content.parts:
-                text = content.parts[0].text
-            else:
-                print("⚠️ No text parts in content.")
-        else:
-            print("⚠️ No candidates returned.")
+        print(f"response:", response)
 
-        
-        # response = self.genai_model.generate_content(prompt)
-        response_text = text
-        response_text = response_text[7:]
-        response_text = response_text[:-3]
-
-
+        response_text = response.output_text
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
 
         return json.loads(response_text)
 

@@ -6,14 +6,23 @@ import threading
 import multiprocessing as mp
 from flask_cors import CORS
 from dotenv import load_dotenv
+from openai import AzureOpenAI
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-api_key = os.getenv('GOOGLE_API_KEY')
-recommender = ItenaryRecommendationSystem(api_key=api_key)
+client = AzureOpenAI(
+    api_key=os.getenv('AZURE_OPENAI_API_KEY'),
+    azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
+    api_version=os.getenv('AZURE_OPENAI_API_VERSION', '2024-12-01-preview'),
+)
+
+chat_deployment = os.getenv('AZURE_OPENAI_CHAT_DEPLOYMENT')
+embedding_deployment = os.getenv('AZURE_OPENAI_EMBEDDING_DEPLOYMENT')
+
+recommender = ItenaryRecommendationSystem(client, chat_deployment, embedding_deployment)
 imageGenerator = ImageGenerator()
 recommender.image_generator = imageGenerator
 

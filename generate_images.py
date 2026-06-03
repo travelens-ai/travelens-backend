@@ -15,9 +15,13 @@ os.makedirs(output_dir, exist_ok=True)
 class ImageGenerator:
     generation_model = None
     places_df = None
-    
+
     def __init__(self):
-        self.genai_client = genai.Client(api_key=os.getenv('GOOGLE_API_KEY'))
+        api_key = os.getenv('GOOGLE_API_KEY')
+        if api_key:
+            self.genai_client = genai.Client(api_key=api_key)
+        else:
+            self.genai_client = None
 
     def getPlaces(self, user_preferences: dict):
         places_df = pd.read_csv("indian_travel_places.csv")
@@ -38,9 +42,11 @@ class ImageGenerator:
 
         # Save the updated DataFrame once after all iterations
         self.places_df.to_csv('indian_travel_places.csv', index=False)
-        print("✅ Updated CSV saved as 'indian_travel_places.csv'")
+        print("Updated CSV saved as 'indian_travel_places.csv'")
 
     def generate_and_save_image(self, place: str) -> str:
+        if not self.genai_client:
+            return ""
         try:
             response = self.genai_client.models.generate_images(
                 model='imagen-3.0-generate-002',
@@ -70,8 +76,8 @@ class ImageGenerator:
             with open(filepath, "wb") as f:
                 f.write(buffer.getvalue())
 
-            print(f"🖼️ Image saved to {filepath} ({size_kb:.2f} KB)")
+            print(f"Image saved to {filepath} ({size_kb:.2f} KB)")
             return filepath
         except Exception as e:
-            print(f"⚠️ Error processing image for {place}: {e}")
+            print(f"Error processing image for {place}: {e}")
             return ""
