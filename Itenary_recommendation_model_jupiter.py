@@ -13,6 +13,7 @@ import schedule
 import time
 import threading
 from generate_images import ImageGenerator
+from api_integrations import GooglePlacesClient, ImageSearchClient
 import os
 import random
 
@@ -34,6 +35,8 @@ class ItenaryRecommendationSystem:
         self.places_df = None
         self.hotels_df = None
         self.restaurants_df = None
+        self.places_client = GooglePlacesClient()
+        self.image_client = ImageSearchClient()
 
     def initialize(self):
         """Initialize models and load data"""
@@ -191,17 +194,17 @@ class ItenaryRecommendationSystem:
 
                 # Batch encode activities (API supports up to 250 per call)
                 activity_list = list(all_activities)
-                for i in range(0, len(activity_list), 200):
-                    batch = activity_list[i:i+200]
+                for i in range(0, len(activity_list), 50):
+                    batch = activity_list[i:i+50]
                     embeddings = self._encode(batch)
                     for text, emb in zip(batch, embeddings):
                         self.activity_embeddings[text] = emb / norm(emb)
-                    print(f"  Encoded activities {i+1}-{min(i+200, len(activity_list))} of {len(activity_list)}")
+                    print(f"  Encoded activities {i+1}-{min(i+50, len(activity_list))} of {len(activity_list)}")
 
                 # Batch encode place types
                 place_type_list = list(all_place_types)
-                for i in range(0, len(place_type_list), 200):
-                    batch = place_type_list[i:i+200]
+                for i in range(0, len(place_type_list), 50):
+                    batch = place_type_list[i:i+50]
                     embeddings = self._encode(batch)
                     for text, emb in zip(batch, embeddings):
                         self.place_type_embeddings[text] = emb / norm(emb)
@@ -361,6 +364,7 @@ class ItenaryRecommendationSystem:
 
             # Get place recommendations
             places = self._get_place_recommendations(user_preferences)
+            places = self._enrich_place_images(places)
 
             # Get hotel recommendations
             hotels = self._get_hotel_recommendations(user_preferences)
@@ -514,14 +518,33 @@ class ItenaryRecommendationSystem:
         return top_places.head(100)
 
 
+    def _enrich_place_images(self, places_df):
+        """Fetch images from Pexels/Unsplash for places that don't have a local image."""
+        if places_df.empty:
+            return places_df
+        for idx, row in places_df.iterrows():
+            if not row.get('image'):
+                url = self.image_client.get_place_image(
+                    row.get('name', '') or row.get('placename', ''),
+                    row.get('city', '')
+                )
+                if url:
+                    places_df.at[idx, 'image'] = url
+        return places_df
+
     def _get_hotel_recommendations(self, user_preferences):
         """Get hotel recommendations based on selected places"""
-        preferred_location = user_preferences["places_of_interest"].lower()
+        city = user_preferences["places_of_interest"]
 
-        #Get Hotel Recommendations
+        live_hotels = self.places_client.search_hotels(city)
+        if live_hotels:
+            return pd.DataFrame(live_hotels).head(100)
+
+        # Fallback to CSV data
+        preferred_location = city.lower()
         top_hotels = self.hotels_df[
             self.hotels_df['city'].str.lower().str.contains(preferred_location, na=False) |
-            self.hotels_df['state'].str.lower().str.contains(preferred_location, na=False)|
+            self.hotels_df['state'].str.lower().str.contains(preferred_location, na=False) |
             self.hotels_df['address'].str.lower().str.contains(preferred_location, na=False)
         ].sort_values('site_review_rating', ascending=False)
 
@@ -530,27 +553,30 @@ class ItenaryRecommendationSystem:
 
     def _get_restaurant_recommendations(self, user_preferences):
         """Get restaurant recommendations based on location and preferences"""
-        preferred_cuisines = [self.normalize(cuisine) for cuisine in user_preferences["food_preferences"].split(',')]   # Normalize cuisines
-        preferred_location = user_preferences["places_of_interest"].lower()
+        city = user_preferences["places_of_interest"]
+        cuisine = user_preferences["food_preferences"]
 
+        live_restaurants = self.places_client.search_restaurants(city, cuisine)
+        if live_restaurants:
+            return pd.DataFrame(live_restaurants).head(100)
 
-        # Get top 100 restaurants
+        # Fallback to CSV data
+        preferred_cuisines = [self.normalize(c) for c in cuisine.split(',')]
+        preferred_location = city.lower()
+
         top_restaurants = self.restaurants_df[
             (self.restaurants_df['City'].apply(self.normalize).str.contains(preferred_location, na=False) |
             self.restaurants_df['Locality'].apply(self.normalize).str.contains(preferred_location, na=False)) &
-            (self.restaurants_df['Cuisine'].apply(self.normalize).str.contains('|'.join(preferred_cuisines), na=False))  # Cuisine filter
+            (self.restaurants_df['Cuisine'].apply(self.normalize).str.contains('|'.join(preferred_cuisines), na=False))
         ].sort_values('Rating', ascending=False)
         top_restaurants = top_restaurants.drop_duplicates(subset=['Name'], keep='first')
 
         C = top_restaurants['Rating'].mean()
-        # Calculate weighted rating score for each place for user preferences
         top_restaurants['rating_score'] = top_restaurants.apply(
             lambda x: self.weighted_restaurants_rating(x, C), axis=1
         )
 
-        top_restaurants = top_restaurants.sort_values('rating_score', ascending=False)
-
-        return top_restaurants.head(100)
+        return top_restaurants.sort_values('rating_score', ascending=False).head(100)
 
 
 
