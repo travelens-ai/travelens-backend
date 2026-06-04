@@ -7,11 +7,22 @@ import multiprocessing as mp
 from flask_cors import CORS
 from dotenv import load_dotenv
 from openai import AzureOpenAI
+from flasgger import Swagger
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+from swagger_config import swagger_template, swagger_config
+Swagger(app, template=swagger_template, config=swagger_config)
+
+from auth import auth_bp
+from db import init_db_async
+
+app.register_blueprint(auth_bp)
+
+init_db_async()
 
 client = AzureOpenAI(
     api_key=os.getenv('AZURE_OPENAI_API_KEY'),
@@ -43,6 +54,14 @@ threading.Thread(target=_do_initialize, daemon=True).start()
 
 @app.route('/health', methods=['GET'])
 def health_check():
+    """Health check
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: Service is healthy
+    """
     return jsonify({"status": "healthy", "initialized": _initialized}), 200
 
 def _loading_response():
@@ -51,6 +70,22 @@ def _loading_response():
 
 @app.route('/generate-itinerary', methods=['POST'])
 def generate_itinerary():
+    """Generate travel itinerary
+    ---
+    tags:
+      - Travel
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+    responses:
+      200:
+        description: Itinerary generated
+      503:
+        description: Service still loading
+    """
     if not _initialized:
         return _loading_response()
     try:
@@ -66,6 +101,16 @@ def generate_itinerary():
 
 @app.route('/popular-destination', methods=['GET'])
 def get_popular_destination():
+    """Get popular destinations
+    ---
+    tags:
+      - Travel
+    responses:
+      200:
+        description: List of popular destinations
+      503:
+        description: Service still loading
+    """
     if not _initialized:
         return _loading_response()
     try:
@@ -81,6 +126,22 @@ def get_popular_destination():
 
 @app.route('/generate-images', methods=['POST'])
 def generate_images():
+    """Generate images for places
+    ---
+    tags:
+      - Travel
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+    responses:
+      200:
+        description: Images generated
+      503:
+        description: Service still loading
+    """
     if not _initialized:
         return _loading_response()
     try:
