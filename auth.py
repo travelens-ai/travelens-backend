@@ -215,7 +215,6 @@ def send_otp():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/verify-otp", methods=["POST"])
@@ -288,7 +287,6 @@ def verify_otp():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/signup", methods=["POST"])
@@ -413,7 +411,6 @@ def signup():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/login", methods=["POST"])
@@ -493,7 +490,6 @@ def login():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/forgot-password", methods=["POST"])
@@ -556,7 +552,6 @@ def send_otp_internal(email, purpose):
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/reset-password", methods=["POST"])
@@ -630,7 +625,6 @@ def reset_password():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/update", methods=["PUT"])
@@ -730,7 +724,6 @@ def update_profile():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/google-login", methods=["POST"])
@@ -835,7 +828,6 @@ def google_login():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/favorite", methods=["POST"])
@@ -898,7 +890,6 @@ def add_favorite():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/favorite", methods=["GET"])
@@ -950,7 +941,6 @@ def get_favorites():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/favorite", methods=["DELETE"])
@@ -1009,7 +999,6 @@ def remove_favorite():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/history", methods=["POST"])
@@ -1073,7 +1062,6 @@ def add_history():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()
 
 
 @auth_bp.route("/history", methods=["GET"])
@@ -1125,4 +1113,3 @@ def get_history():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
-        conn.close()

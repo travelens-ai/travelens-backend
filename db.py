@@ -1,5 +1,4 @@
 import mysql.connector
-from mysql.connector import pooling
 import os
 import threading
 
@@ -10,25 +9,19 @@ db_config = {
     "database": os.getenv("DB_NAME"),
 }
 
-connection_pool = None
+_connection = None
 _db_initialized = False
 _db_error = None
-
-
-def get_pool():
-    global connection_pool
-    if connection_pool is None:
-        connection_pool = pooling.MySQLConnectionPool(
-            pool_name="travelens_pool",
-            pool_size=5,
-            pool_reset_session=True,
-            **db_config
-        )
-    return connection_pool
+_lock = threading.Lock()
 
 
 def get_connection():
-    return get_pool().get_connection()
+    global _connection
+    with _lock:
+        if _connection is None or not _connection.is_connected():
+            _connection = mysql.connector.connect(**db_config)
+            _connection.autocommit = False
+        return _connection
 
 
 def is_db_ready():
@@ -112,7 +105,6 @@ def init_db():
 
         conn.commit()
         cursor.close()
-        conn.close()
         _db_initialized = True
         print("Database tables initialized successfully.")
     except Exception as e:

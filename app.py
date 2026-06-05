@@ -123,7 +123,6 @@ def generate_itinerary():
                 conn.commit()
                 itinerary_id = cursor.lastrowid
                 cursor.close()
-                conn.close()
             except Exception as db_err:
                 print(f"Failed to store itinerary: {db_err}")
 
