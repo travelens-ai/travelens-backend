@@ -823,3 +823,202 @@ def google_login():
     finally:
         cursor.close()
         conn.close()
+
+
+@auth_bp.route("/favorite", methods=["POST"])
+@token_required
+def add_favorite():
+    """Add itinerary to favorites
+    ---
+    tags:
+      - Favorites
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - itinerary_id
+          properties:
+            itinerary_id:
+              type: integer
+              example: 1
+            device_id:
+              type: string
+              example: "abc123-device-uuid"
+    responses:
+      201:
+        description: Added to favorites
+      409:
+        description: Already in favorites
+      401:
+        description: Token missing or invalid
+    """
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "Request body is required"}), 400
+
+    itinerary_id = data.get("itinerary_id")
+    device_id = data.get("device_id")
+    if not itinerary_id:
+        return jsonify({"status": "error", "message": "itinerary_id is required"}), 400
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        user_id = request.user_id
+
+        cursor.execute("SELECT id FROM itineraries WHERE id = %s", (itinerary_id,))
+        if not cursor.fetchone():
+            return jsonify({"status": "error", "message": "Itinerary not found"}), 404
+
+        cursor.execute(
+            "INSERT INTO favorites (user_id, itinerary_id, device_id) VALUES (%s, %s, %s)",
+            (user_id, itinerary_id, device_id),
+        )
+        conn.commit()
+
+        return jsonify({"status": "success", "message": "Added to favorites"}), 201
+    except mysql.connector.IntegrityError:
+        return jsonify({"status": "error", "message": "Already in favorites"}), 409
+    except mysql.connector.Error as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@auth_bp.route("/favorite", methods=["DELETE"])
+@token_required
+def remove_favorite():
+    """Remove itinerary from favorites
+    ---
+    tags:
+      - Favorites
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - itinerary_id
+          properties:
+            itinerary_id:
+              type: integer
+              example: 1
+    responses:
+      200:
+        description: Removed from favorites
+      404:
+        description: Favorite not found
+      401:
+        description: Token missing or invalid
+    """
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "Request body is required"}), 400
+
+    itinerary_id = data.get("itinerary_id")
+    if not itinerary_id:
+        return jsonify({"status": "error", "message": "itinerary_id is required"}), 400
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        user_id = request.user_id
+
+        cursor.execute(
+            "DELETE FROM favorites WHERE user_id = %s AND itinerary_id = %s",
+            (user_id, itinerary_id),
+        )
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            return jsonify({"status": "error", "message": "Favorite not found"}), 404
+
+        return jsonify({"status": "success", "message": "Removed from favorites"}), 200
+    except mysql.connector.Error as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@auth_bp.route("/history", methods=["POST"])
+def add_history():
+    """Add itinerary to history
+    ---
+    tags:
+      - History
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - itinerary_id
+            - device_id
+          properties:
+            itinerary_id:
+              type: integer
+              example: 1
+            device_id:
+              type: string
+              example: "abc123-device-uuid"
+    responses:
+      201:
+        description: Added to history
+      400:
+        description: Missing required fields
+      404:
+        description: Itinerary not found
+    """
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "Request body is required"}), 400
+
+    itinerary_id = data.get("itinerary_id")
+    device_id = data.get("device_id")
+
+    if not itinerary_id or not device_id:
+        return jsonify({"status": "error", "message": "itinerary_id and device_id are required"}), 400
+
+    user_id = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token_data = _decode_token(auth_header.split(" ")[1])
+        if token_data:
+            user_id = token_data["user_id"]
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT id FROM itineraries WHERE id = %s", (itinerary_id,))
+        if not cursor.fetchone():
+            return jsonify({"status": "error", "message": "Itinerary not found"}), 404
+
+        cursor.execute(
+            "INSERT INTO history (user_id, itinerary_id, device_id) VALUES (%s, %s, %s)",
+            (user_id, itinerary_id, device_id),
+        )
+        conn.commit()
+
+        return jsonify({"status": "success", "message": "Added to history"}), 201
+    except mysql.connector.Error as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()

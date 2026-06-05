@@ -74,6 +74,41 @@ def init_db():
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS itineraries (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                request_json JSON NOT NULL,
+                response_json JSON,
+                status ENUM('success', 'error') DEFAULT 'success',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                itinerary_id INT NOT NULL,
+                device_id VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_favorite (user_id, itinerary_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                itinerary_id INT NOT NULL,
+                device_id VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
+            )
+        """)
+
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT FALSE")
         except mysql.connector.Error:

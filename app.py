@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from Itenary_recommendation_model_jupiter import ItenaryRecommendationSystem
 from generate_images import ImageGenerator
 import os
+import time
 import threading
 import multiprocessing as mp
 from flask_cors import CORS
@@ -18,11 +19,13 @@ from swagger_config import swagger_template, swagger_config
 Swagger(app, template=swagger_template, config=swagger_config)
 
 from auth import auth_bp
-from db import init_db_async
+from db import init_db_async, get_connection, is_db_ready
 
 app.register_blueprint(auth_bp)
 
 init_db_async()
+
+_itinerary_cache = {}
 
 client = AzureOpenAI(
     api_key=os.getenv('AZURE_OPENAI_API_KEY'),
@@ -89,8 +92,47 @@ def generate_itinerary():
     if not _initialized:
         return _loading_response()
     try:
+        import json
         user_preferences = request.json
+        cache_key = json.dumps(user_preferences, sort_keys=True)
+
+        # Check local cache
+        cached = _itinerary_cache.get(cache_key)
+        if cached:
+            cache_time, cache_result, cache_id = cached
+            if (time.time() - cache_time) < 86400:
+                response = cache_result.copy() if isinstance(cache_result, dict) else cache_result
+                if isinstance(response, dict):
+                    response["itinerary_id"] = cache_id
+                return jsonify(response), 200
+            else:
+                del _itinerary_cache[cache_key]
+
         result = recommender.generate_itinerary(user_preferences)
+
+        # Store in DB and get itinerary_id
+        itinerary_id = None
+        if is_db_ready():
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO itineraries (request_json, response_json, status) VALUES (%s, %s, %s)",
+                    (json.dumps(user_preferences), json.dumps(result), "success"),
+                )
+                conn.commit()
+                itinerary_id = cursor.lastrowid
+                cursor.close()
+                conn.close()
+            except Exception as db_err:
+                print(f"Failed to store itinerary: {db_err}")
+
+        # Store in local cache
+        _itinerary_cache[cache_key] = (time.time(), result, itinerary_id)
+
+        if isinstance(result, dict):
+            result["itinerary_id"] = itinerary_id
+
         return jsonify(result), 200
     except Exception as e:
         print(f"Error generating itinerary: {e}")
