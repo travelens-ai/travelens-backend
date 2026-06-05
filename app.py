@@ -5,10 +5,13 @@ import os
 import time
 import threading
 import multiprocessing as mp
+import requests as http_requests
 from flask_cors import CORS
 from dotenv import load_dotenv
 from openai import AzureOpenAI
 from flasgger import Swagger
+import math
+import pandas as pd
 
 load_dotenv()
 
@@ -195,6 +198,140 @@ def generate_images():
             "status": "error",
             "message": str(e)
         }), 500
+
+
+
+# City coordinates cache for nearby calculation
+_city_coords_cache = {}
+_city_coords_loaded = False
+
+
+def _haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _load_city_coords():
+    global _city_coords_cache, _city_coords_loaded
+    import pickle
+    cache_file = 'city_coords.pkl'
+    if os.path.exists(cache_file):
+        with open(cache_file, 'rb') as f:
+            _city_coords_cache = pickle.load(f)
+        _city_coords_loaded = True
+        print(f"Loaded {len(_city_coords_cache)} city coordinates from cache.")
+        return
+
+    places_df = pd.read_csv('indian_travel_places.csv')
+    cities = places_df['city'].unique()
+    for city in cities:
+        try:
+            resp = http_requests.get(
+                f"https://nominatim.openstreetmap.org/search?q={city},India&format=json&limit=1",
+                headers={"User-Agent": "Travelens/1.0"},
+                timeout=5,
+            )
+            if resp.status_code == 200 and resp.json():
+                data = resp.json()[0]
+                _city_coords_cache[city] = (float(data["lat"]), float(data["lon"]))
+            time.sleep(1)
+        except Exception:
+            pass
+
+    with open(cache_file, 'wb') as f:
+        pickle.dump(_city_coords_cache, f)
+    _city_coords_loaded = True
+    print(f"Geocoded and cached {len(_city_coords_cache)} cities.")
+
+
+threading.Thread(target=_load_city_coords, daemon=True).start()
+
+
+@app.route('/places', methods=['GET'])
+def get_places():
+    """Get places by type: popular, nearby, trending or weekend
+    ---
+    tags:
+      - Places
+    parameters:
+      - in: query
+        name: type
+        type: string
+        required: true
+        enum: [popular, nearby, trending, weekend]
+        description: Type of places to fetch
+      - in: query
+        name: lat
+        type: number
+        description: User latitude (required for nearby and weekend)
+      - in: query
+        name: long
+        type: number
+        description: User longitude (required for nearby and weekend)
+    responses:
+      200:
+        description: Returns 10 places of the requested type
+      400:
+        description: Invalid type or missing params
+      503:
+        description: Service still loading
+    """
+    if not _initialized:
+        return _loading_response()
+
+    place_type = request.args.get("type")
+    if not place_type or place_type not in ("popular", "nearby", "trending", "weekend"):
+        return jsonify({"status": "error", "message": "type query param is required (popular/nearby/trending/weekend)"}), 400
+
+    lat = request.args.get("lat", type=float)
+    long = request.args.get("long", type=float)
+
+    if place_type in ("nearby", "weekend") and (lat is None or long is None):
+        return jsonify({"status": "error", "message": "lat and long are required for nearby/weekend"}), 400
+
+    try:
+        if place_type == "popular":
+            result = recommender.get_popular_destination() or []
+            return jsonify({"status": "success", "places": result}), 200
+
+        if place_type == "trending":
+            places_df = pd.read_csv('indian_travel_places.csv')
+            places_df['no of rating'] = pd.to_numeric(places_df['no of rating'], errors='coerce').fillna(0)
+            trending_df = places_df.nlargest(10, 'no of rating')
+            result = trending_df.fillna('').to_dict(orient='records')
+            return jsonify({"status": "success", "places": result}), 200
+
+        # For nearby and weekend, calculate distances
+        places_df = pd.read_csv('indian_travel_places.csv')
+        places_df['rating'] = pd.to_numeric(places_df['rating'], errors='coerce').fillna(0)
+
+        nearby_with_dist = []
+        for _, row in places_df.iterrows():
+            city = row['city']
+            if city in _city_coords_cache:
+                dist = _haversine(lat, long, _city_coords_cache[city][0], _city_coords_cache[city][1])
+                nearby_with_dist.append((dist, row.fillna('').to_dict()))
+
+        nearby_with_dist.sort(key=lambda x: x[0])
+
+        if place_type == "nearby":
+            result = [place for _, place in nearby_with_dist[:10]]
+            return jsonify({"status": "success", "places": result}), 200
+
+        # Weekend: places within 300km, sorted by rating (2 days 1 night)
+        weekend_candidates = [(d, p) for d, p in nearby_with_dist if d <= 300]
+        weekend_candidates.sort(key=lambda x: float(x[1].get("rating", 0) or 0), reverse=True)
+        result = [place for _, place in weekend_candidates[:10]]
+        return jsonify({"status": "success", "places": result}), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     mp.set_start_method("spawn", force=True)
