@@ -87,12 +87,10 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                user_id INT NOT NULL,
+                user_id VARCHAR(255) NOT NULL,
                 itinerary_id INT NOT NULL,
-                device_id VARCHAR(255),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY unique_favorite (user_id, itinerary_id),
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
             )
         """)
@@ -100,11 +98,9 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS history (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                user_id INT,
+                user_id VARCHAR(255) NOT NULL,
                 itinerary_id INT NOT NULL,
-                device_id VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
             )
         """)

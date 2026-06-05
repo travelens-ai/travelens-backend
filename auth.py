@@ -355,6 +355,7 @@ def signup():
     gender = data.get("gender")
     trip_type = data.get("trip_type")
     trip_companion = data.get("trip_companion")
+    device_id = data.get("device_id")
 
     if not name or not email or not password:
         return jsonify({"status": "error", "message": "Name, email and password are required"}), 400
@@ -383,6 +384,18 @@ def signup():
         )
         conn.commit()
         user_id = cursor.lastrowid
+
+        # Migrate favorites and history from device_id to new user_id
+        if device_id:
+            cursor.execute(
+                "UPDATE favorites SET user_id = %s WHERE user_id = %s",
+                (str(user_id), device_id),
+            )
+            cursor.execute(
+                "UPDATE history SET user_id = %s WHERE user_id = %s",
+                (str(user_id), device_id),
+            )
+            conn.commit()
 
         # Cleanup used OTP records
         cursor.execute("DELETE FROM otp_verifications WHERE email = %s AND purpose = 'signup'", (email,))
@@ -826,14 +839,11 @@ def google_login():
 
 
 @auth_bp.route("/favorite", methods=["POST"])
-@token_required
 def add_favorite():
     """Add itinerary to favorites
     ---
     tags:
       - Favorites
-    security:
-      - Bearer: []
     parameters:
       - in: body
         name: body
@@ -842,43 +852,41 @@ def add_favorite():
           type: object
           required:
             - itinerary_id
+            - user_id
           properties:
             itinerary_id:
               type: integer
               example: 1
-            device_id:
+            user_id:
               type: string
+              description: Device ID (before signup) or user ID (after signup)
               example: "abc123-device-uuid"
     responses:
       201:
         description: Added to favorites
       409:
         description: Already in favorites
-      401:
-        description: Token missing or invalid
     """
     data = request.json
     if not data:
         return jsonify({"status": "error", "message": "Request body is required"}), 400
 
     itinerary_id = data.get("itinerary_id")
-    device_id = data.get("device_id")
-    if not itinerary_id:
-        return jsonify({"status": "error", "message": "itinerary_id is required"}), 400
+    user_id = data.get("user_id")
+    if not itinerary_id or not user_id:
+        return jsonify({"status": "error", "message": "itinerary_id and user_id are required"}), 400
 
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
 
     try:
-        user_id = request.user_id
-
         cursor.execute("SELECT id FROM itineraries WHERE id = %s", (itinerary_id,))
         if not cursor.fetchone():
             return jsonify({"status": "error", "message": "Itinerary not found"}), 404
 
         cursor.execute(
-            "INSERT INTO favorites (user_id, itinerary_id, device_id) VALUES (%s, %s, %s)",
-            (user_id, itinerary_id, device_id),
+            "INSERT INTO favorites (user_id, itinerary_id) VALUES (%s, %s)",
+            (str(user_id), itinerary_id),
         )
         conn.commit()
 
@@ -893,15 +901,64 @@ def add_favorite():
         conn.close()
 
 
+@auth_bp.route("/favorite", methods=["GET"])
+def get_favorites():
+    """Get favorite itineraries by user_id
+    ---
+    tags:
+      - Favorites
+    parameters:
+      - in: query
+        name: user_id
+        type: string
+        required: true
+        description: Device ID or user ID
+    responses:
+      200:
+        description: List of favorite itineraries
+      400:
+        description: user_id is required
+    """
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_id query param is required"}), 400
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """SELECT f.id, f.itinerary_id, f.created_at,
+                      i.request_json, i.response_json
+               FROM favorites f
+               JOIN itineraries i ON f.itinerary_id = i.id
+               WHERE f.user_id = %s
+               ORDER BY f.created_at DESC""",
+            (user_id,),
+        )
+        favorites = cursor.fetchall()
+
+        import json
+        for fav in favorites:
+            fav["request_json"] = json.loads(fav["request_json"]) if fav["request_json"] else None
+            fav["response_json"] = json.loads(fav["response_json"]) if fav["response_json"] else None
+            if fav.get("created_at"):
+                fav["created_at"] = fav["created_at"].isoformat()
+
+        return jsonify({"status": "success", "favorites": favorites}), 200
+    except mysql.connector.Error as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @auth_bp.route("/favorite", methods=["DELETE"])
-@token_required
 def remove_favorite():
     """Remove itinerary from favorites
     ---
     tags:
       - Favorites
-    security:
-      - Bearer: []
     parameters:
       - in: body
         name: body
@@ -910,35 +967,36 @@ def remove_favorite():
           type: object
           required:
             - itinerary_id
+            - user_id
           properties:
             itinerary_id:
               type: integer
               example: 1
+            user_id:
+              type: string
+              example: "abc123-device-uuid"
     responses:
       200:
         description: Removed from favorites
       404:
         description: Favorite not found
-      401:
-        description: Token missing or invalid
     """
     data = request.json
     if not data:
         return jsonify({"status": "error", "message": "Request body is required"}), 400
 
     itinerary_id = data.get("itinerary_id")
-    if not itinerary_id:
-        return jsonify({"status": "error", "message": "itinerary_id is required"}), 400
+    user_id = data.get("user_id")
+    if not itinerary_id or not user_id:
+        return jsonify({"status": "error", "message": "itinerary_id and user_id are required"}), 400
 
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
 
     try:
-        user_id = request.user_id
-
         cursor.execute(
             "DELETE FROM favorites WHERE user_id = %s AND itinerary_id = %s",
-            (user_id, itinerary_id),
+            (str(user_id), itinerary_id),
         )
         conn.commit()
 
@@ -968,13 +1026,14 @@ def add_history():
           type: object
           required:
             - itinerary_id
-            - device_id
+            - user_id
           properties:
             itinerary_id:
               type: integer
               example: 1
-            device_id:
+            user_id:
               type: string
+              description: Device ID (before signup) or user ID (after signup)
               example: "abc123-device-uuid"
     responses:
       201:
@@ -989,17 +1048,10 @@ def add_history():
         return jsonify({"status": "error", "message": "Request body is required"}), 400
 
     itinerary_id = data.get("itinerary_id")
-    device_id = data.get("device_id")
+    user_id = data.get("user_id")
 
-    if not itinerary_id or not device_id:
-        return jsonify({"status": "error", "message": "itinerary_id and device_id are required"}), 400
-
-    user_id = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token_data = _decode_token(auth_header.split(" ")[1])
-        if token_data:
-            user_id = token_data["user_id"]
+    if not itinerary_id or not user_id:
+        return jsonify({"status": "error", "message": "itinerary_id and user_id are required"}), 400
 
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
@@ -1010,14 +1062,66 @@ def add_history():
             return jsonify({"status": "error", "message": "Itinerary not found"}), 404
 
         cursor.execute(
-            "INSERT INTO history (user_id, itinerary_id, device_id) VALUES (%s, %s, %s)",
-            (user_id, itinerary_id, device_id),
+            "INSERT INTO history (user_id, itinerary_id) VALUES (%s, %s)",
+            (str(user_id), itinerary_id),
         )
         conn.commit()
 
         return jsonify({"status": "success", "message": "Added to history"}), 201
     except mysql.connector.Error as e:
         conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@auth_bp.route("/history", methods=["GET"])
+def get_history():
+    """Get itinerary history by user_id
+    ---
+    tags:
+      - History
+    parameters:
+      - in: query
+        name: user_id
+        type: string
+        required: true
+        description: Device ID or user ID
+    responses:
+      200:
+        description: List of itinerary history
+      400:
+        description: user_id is required
+    """
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return jsonify({"status": "error", "message": "user_id query param is required"}), 400
+
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        cursor.execute(
+            """SELECT h.id, h.itinerary_id, h.created_at,
+                      i.request_json, i.response_json
+               FROM history h
+               JOIN itineraries i ON h.itinerary_id = i.id
+               WHERE h.user_id = %s
+               ORDER BY h.created_at DESC""",
+            (user_id,),
+        )
+        history = cursor.fetchall()
+
+        import json
+        for item in history:
+            item["request_json"] = json.loads(item["request_json"]) if item["request_json"] else None
+            item["response_json"] = json.loads(item["response_json"]) if item["response_json"] else None
+            if item.get("created_at"):
+                item["created_at"] = item["created_at"].isoformat()
+
+        return jsonify({"status": "success", "history": history}), 200
+    except mysql.connector.Error as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
