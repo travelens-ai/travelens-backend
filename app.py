@@ -13,10 +13,31 @@ from flasgger import Swagger
 import math
 import pandas as pd
 
+import socket
+
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+
+try:
+    _server_ip = socket.gethostbyname(socket.gethostname())
+except Exception:
+    _server_ip = "unknown"
+
+
+@app.after_request
+def add_server_ip(response):
+    if response.content_type and "application/json" in response.content_type:
+        try:
+            data = response.get_json(silent=True)
+            if isinstance(data, dict):
+                data["server_ip"] = _server_ip
+                response.data = jsonify(data).data
+        except Exception:
+            pass
+    return response
 
 from swagger_config import swagger_template, swagger_config
 Swagger(app, template=swagger_template, config=swagger_config)
