@@ -1,13 +1,19 @@
 import mysql.connector
 import os
 import threading
-
+import time
 db_config = {
     "host": os.getenv("DB_HOST"),
+    "port": 3306,
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME"),
 }
+
+if os.getenv("DB_SSL", "true").lower() == "true":
+    db_config["ssl_disabled"] = False
+else:
+    db_config["ssl_disabled"] = True
 
 _connection = None
 _db_initialized = False
@@ -30,8 +36,24 @@ def is_db_ready():
 
 def init_db():
     global _db_initialized, _db_error
+    max_retries = 5
+    print(f"[DB] Connecting to database at {db_config['host']}:{db_config['port']}...")
+    for attempt in range(max_retries):
+        try:
+            print(f"[DB] Connection attempt {attempt + 1}/{max_retries}...")
+            conn = get_connection()
+            print(f"[DB] Connected successfully to {db_config['database']}.")
+            break
+        except Exception as e:
+            _db_error = str(e)
+            print(f"[DB] Connection attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                print(f"[DB] Retrying in 5 seconds...")
+                time.sleep(5)
+            else:
+                print("[DB] All connection attempts failed. App will continue without database.")
+                return
     try:
-        conn = get_connection()
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -106,10 +128,10 @@ def init_db():
         conn.commit()
         cursor.close()
         _db_initialized = True
-        print("Database tables initialized successfully.")
+        print("[DB] All tables initialized successfully. Database is ready.")
     except Exception as e:
         _db_error = str(e)
-        print(f"Database initialization failed (app will continue): {e}")
+        print(f"[DB] Table initialization failed: {e}")
 
 
 def init_db_async():
