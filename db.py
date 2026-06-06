@@ -8,12 +8,8 @@ db_config = {
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME"),
+    "ssl_disabled": True
 }
-
-if os.getenv("DB_SSL", "true").lower() == "true":
-    db_config["ssl_disabled"] = False
-else:
-    db_config["ssl_disabled"] = True
 
 _connection = None
 _db_initialized = False
