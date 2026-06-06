@@ -2,15 +2,16 @@ import mysql.connector
 import os
 import threading
 import time
-db_config = {
-    "host": os.getenv("DB_HOST"),
-    "port": 3306,
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
-    "database": os.getenv("DB_NAME"),
-    "ssl_disabled": os.getenv("DB_SSL_DISABLED", "false").lower() == "true",
-    "connection_timeout": 10,
-}
+def _get_db_config():
+    return {
+        "host": os.getenv("DB_HOST", "193.203.184.43"),
+        "port": 3306,
+        "user": os.getenv("DB_USER", "u574280806_travelens"),
+        "password": os.getenv("DB_PASSWORD", "Travelens@123"),
+        "database": os.getenv("DB_NAME", "u574280806_travelens"),
+        "ssl_disabled": True,
+        "connection_timeout": 10,
+    }
 
 _connection = None
 _db_initialized = False
@@ -22,6 +23,8 @@ def get_connection():
     global _connection
     with _lock:
         if _connection is None or not _connection.is_connected():
+            db_config = _get_db_config()
+            print(f"[DB] Attempting connection to {db_config['host']}:{db_config['port']}/{db_config['database']}")
             _connection = mysql.connector.connect(**db_config)
             _connection.autocommit = False
         return _connection
@@ -34,6 +37,7 @@ def is_db_ready():
 def init_db():
     global _db_initialized, _db_error
     max_retries = 5
+    db_config = _get_db_config()
     print(f"[DB] Connecting to database at {db_config['host']}:{db_config['port']}...")
     for attempt in range(max_retries):
         try:
