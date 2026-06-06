@@ -8,7 +8,8 @@ db_config = {
     "user": os.getenv("DB_USER"),
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME"),
-    "ssl_disabled": True
+    "ssl_disabled": os.getenv("DB_SSL_DISABLED", "false").lower() == "true",
+    "connection_timeout": 10,
 }
 
 _connection = None
