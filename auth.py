@@ -919,10 +919,9 @@ def get_favorites():
 
     try:
         cursor.execute(
-            """SELECT f.id, f.itinerary_id, f.created_at,
-                      i.request_json, i.response_json
+            """SELECT f.id, f.itinerary_id, f.created_at, i.response_json
                FROM favorites f
-               JOIN itineraries i ON f.itinerary_id = i.id
+               LEFT JOIN itineraries i ON f.itinerary_id = i.id
                WHERE f.user_id = %s
                ORDER BY f.created_at DESC""",
             (user_id,),
@@ -931,8 +930,8 @@ def get_favorites():
 
         import json
         for fav in favorites:
-            fav["request_json"] = json.loads(fav["request_json"]) if fav["request_json"] else None
-            fav["response_json"] = json.loads(fav["response_json"]) if fav["response_json"] else None
+            fav["itinerary"] = json.loads(fav["response_json"]) if fav["response_json"] else None
+            del fav["response_json"]
             if fav.get("created_at"):
                 fav["created_at"] = fav["created_at"].isoformat()
 
@@ -1091,10 +1090,9 @@ def get_history():
 
     try:
         cursor.execute(
-            """SELECT h.id, h.itinerary_id, h.created_at,
-                      i.request_json, i.response_json
+            """SELECT h.id, h.itinerary_id, h.created_at, i.response_json
                FROM history h
-               JOIN itineraries i ON h.itinerary_id = i.id
+               LEFT JOIN itineraries i ON h.itinerary_id = i.id
                WHERE h.user_id = %s
                ORDER BY h.created_at DESC""",
             (user_id,),
@@ -1103,8 +1101,8 @@ def get_history():
 
         import json
         for item in history:
-            item["request_json"] = json.loads(item["request_json"]) if item["request_json"] else None
-            item["response_json"] = json.loads(item["response_json"]) if item["response_json"] else None
+            item["itinerary"] = json.loads(item["response_json"]) if item["response_json"] else None
+            del item["response_json"]
             if item.get("created_at"):
                 item["created_at"] = item["created_at"].isoformat()
 
