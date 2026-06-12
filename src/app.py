@@ -19,6 +19,7 @@ from features.places.service import load_city_coords
 from features.images import images_bp
 from features.user import user_bp
 from features.weather import weather_bp
+from features.search import search_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -50,6 +51,7 @@ app.register_blueprint(places_bp)
 app.register_blueprint(images_bp)
 app.register_blueprint(user_bp)
 app.register_blueprint(weather_bp)
+app.register_blueprint(search_bp)
 
 init_db_async()
 initialize_recommender()
