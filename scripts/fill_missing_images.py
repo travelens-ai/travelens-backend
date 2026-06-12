@@ -156,7 +156,11 @@ def main(limit=None):
     write_cursor = conn.cursor()
 
     read_cursor.execute(
-        "SELECT id, name, city, state, type FROM places WHERE image IS NULL OR image = ''"
+        "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type "
+        "FROM places p "
+        "LEFT JOIN cities c ON p.city_id = c.id "
+        "LEFT JOIN states s ON c.state_id = s.id "
+        "WHERE p.image IS NULL OR p.image = ''"
     )
     rows = read_cursor.fetchall()
     if limit:

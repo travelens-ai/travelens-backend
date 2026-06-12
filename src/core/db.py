@@ -133,7 +133,8 @@ def init_db():
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS cities (
-                name VARCHAR(100) PRIMARY KEY,
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
                 state_id INT,
                 lat DECIMAL(9,6),
                 lon DECIMAL(9,6)
@@ -143,8 +144,7 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS places (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                city VARCHAR(100) NOT NULL,
-                state VARCHAR(100),
+                city_id INT,
                 name VARCHAR(255) NOT NULL,
                 type VARCHAR(100),
                 dist_airport DECIMAL(8,2),
@@ -160,9 +160,10 @@ def init_db():
                 prefer_family_no_children BOOLEAN DEFAULT FALSE,
                 famous_activities_rating TEXT,
                 image VARCHAR(255),
-                INDEX idx_city (city),
+                INDEX idx_city_id (city_id),
                 INDEX idx_type (type),
-                INDEX idx_rating (rating)
+                INDEX idx_rating (rating),
+                CONSTRAINT fk_places_city FOREIGN KEY (city_id) REFERENCES cities(id)
             )
         """)
 

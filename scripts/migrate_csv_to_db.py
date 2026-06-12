@@ -96,7 +96,8 @@ def migrate():
     print("Creating tables if not exist...")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cities (
-            name VARCHAR(100) PRIMARY KEY,
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL UNIQUE,
             state_id INT,
             lat DECIMAL(9,6),
             lon DECIMAL(9,6)
@@ -105,8 +106,7 @@ def migrate():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS places (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            city VARCHAR(100) NOT NULL,
-            state VARCHAR(100),
+            city_id INT,
             name VARCHAR(255) NOT NULL,
             type VARCHAR(100),
             dist_airport DECIMAL(8,2),
@@ -122,9 +122,10 @@ def migrate():
             prefer_family_no_children BOOLEAN DEFAULT FALSE,
             famous_activities_rating TEXT,
             image VARCHAR(255),
-            INDEX idx_city (city),
+            INDEX idx_city_id (city_id),
             INDEX idx_type (type),
-            INDEX idx_rating (rating)
+            INDEX idx_rating (rating),
+            CONSTRAINT fk_places_city FOREIGN KEY (city_id) REFERENCES cities(id)
         )
     """)
     conn.commit()
@@ -152,6 +153,30 @@ def migrate():
     conn.commit()
     print(f"  {len(city_rows)} cities inserted/updated.")
 
+    # Ensure every city referenced by a place exists in `cities` (places.city_id
+    # is a NOT NULL FK). Some CSV cities may be absent from the coords pkl above.
+    csv_city_state = {}
+    for _, row in df.iterrows():
+        city = str_or_none(row.get("city"))
+        if not city:
+            continue
+        csv_city_state.setdefault(city.lower(), str_or_none(row.get("state")))
+
+    missing_city_rows = [
+        (city, state_id_by_name.get(state))
+        for city, state in csv_city_state.items()
+    ]
+    if missing_city_rows:
+        cursor.executemany(
+            "INSERT IGNORE INTO cities (name, state_id) VALUES (%s, %s)",
+            missing_city_rows,
+        )
+        conn.commit()
+
+    # Map city name -> id for resolving places.city_id below.
+    cursor.execute("SELECT id, name FROM cities")
+    city_id_by_name = {name: cid for cid, name in cursor.fetchall()}
+
     # ── places ──────────────────────────────────────────────────────────────
     print(f"\nLoading {CSV_FILE}...")
     print(f"  {len(df)} rows found.")
@@ -173,10 +198,15 @@ def migrate():
 
     print("Inserting places (batch of 500)...")
     place_rows = []
+    no_city = 0
     for _, row in df.iterrows():
+        city = str_or_none(row.get("city"))
+        city_id = city_id_by_name.get(city.lower()) if city else None
+        if city_id is None:
+            # No resolvable city — city_id is nullable, so keep the row with NULL.
+            no_city += 1
         place_rows.append((
-            str_or_none(row.get("city")).lower() if str_or_none(row.get("city")) else None,
-            str_or_none(row.get("state")),
+            city_id,
             str_or_none(row.get("name")),
             str_or_none(row.get("type")),
             float_or_none(row.get("distance from airport")),
@@ -194,16 +224,19 @@ def migrate():
             str_or_none(row.get("image")),
         ))
 
+    if no_city:
+        print(f"  {no_city} places have no resolvable city (city_id = NULL).")
+
     BATCH = 500
     for i in range(0, len(place_rows), BATCH):
         batch = place_rows[i:i + BATCH]
         cursor.executemany(
             """INSERT INTO places
-               (city, state, name, type, dist_airport, dist_bus_stand, dist_railway,
+               (city_id, name, type, dist_airport, dist_bus_stand, dist_railway,
                 rating, num_ratings, best_month, famous_activities,
                 prefer_friends, prefer_couple, prefer_family_children,
                 prefer_family_no_children, famous_activities_rating, image)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             batch,
         )
         conn.commit()

@@ -72,7 +72,11 @@ def query_trending():
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT * FROM places WHERE num_ratings IS NOT NULL ORDER BY num_ratings DESC LIMIT 10"
+            "SELECT p.*, c.name AS city, s.name AS state "
+            "FROM places p "
+            "LEFT JOIN cities c ON p.city_id = c.id "
+            "LEFT JOIN states s ON c.state_id = s.id "
+            "WHERE p.num_ratings IS NOT NULL ORDER BY p.num_ratings DESC LIMIT 10"
         )
         return [_row_to_dict(r) for r in cursor.fetchall()]
     finally:
@@ -85,8 +89,10 @@ def query_nearby(lat, lon):
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT p.*, c.lat AS city_lat, c.lon AS city_lon "
-            "FROM places p JOIN cities c ON p.city = c.name"
+            "SELECT p.*, c.name AS city, s.name AS state, c.lat AS city_lat, c.lon AS city_lon "
+            "FROM places p "
+            "JOIN cities c ON p.city_id = c.id "
+            "LEFT JOIN states s ON c.state_id = s.id"
         )
         rows = cursor.fetchall()
     finally:
@@ -108,8 +114,10 @@ def query_weekend(lat, lon):
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT p.*, c.lat AS city_lat, c.lon AS city_lon "
-            "FROM places p JOIN cities c ON p.city = c.name"
+            "SELECT p.*, c.name AS city, s.name AS state, c.lat AS city_lat, c.lon AS city_lon "
+            "FROM places p "
+            "JOIN cities c ON p.city_id = c.id "
+            "LEFT JOIN states s ON c.state_id = s.id"
         )
         rows = cursor.fetchall()
     finally:

@@ -33,7 +33,11 @@ def search(q, limit=10):
         places = []
         if remaining > 0:
             cursor.execute(
-                "SELECT name, city, state FROM places WHERE name LIKE %s LIMIT %s",
+                "SELECT p.name, c.name AS city, s.name AS state "
+                "FROM places p "
+                "LEFT JOIN cities c ON p.city_id = c.id "
+                "LEFT JOIN states s ON c.state_id = s.id "
+                "WHERE p.name LIKE %s LIMIT %s",
                 (q_lower + "%", remaining),
             )
             places = [
