@@ -17,6 +17,7 @@ from features.itinerary.service import initialize_recommender, is_initialized
 from features.places import places_bp
 from features.places.service import load_city_coords
 from features.images import images_bp
+from features.user import user_bp
 from features.weather import weather_bp
 
 app = Flask(__name__)
@@ -47,6 +48,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(itinerary_bp)
 app.register_blueprint(places_bp)
 app.register_blueprint(images_bp)
+app.register_blueprint(user_bp)
 app.register_blueprint(weather_bp)
 
 init_db_async()
