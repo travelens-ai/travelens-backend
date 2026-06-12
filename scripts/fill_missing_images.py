@@ -5,7 +5,8 @@ Fetches from Pexels (primary) → Unsplash (fallback), downloads as .webp,
 saves to generated_images/, updates places.image in DB.
 
 Run from project root:
-    .venv/bin/python3 scripts/fill_missing_images.py
+    .venv/bin/python3 scripts/fill_missing_images.py          # all missing
+    .venv/bin/python3 scripts/fill_missing_images.py --limit 10  # test first N
 """
 
 import os
@@ -38,8 +39,68 @@ DB_CONFIG = {
 }
 
 
+WIKIMEDIA_URL = "https://commons.wikimedia.org/w/api.php"
+_SKIP_WORDS = {"map", "logo", "icon", "flag", "svg", "diagram", "coat", "plan", "stamp", "chart"}
+
+
+_WIKIMEDIA_HEADERS = {
+    "User-Agent": "TravelensImageBot/1.0 (travelens-backend; image-fill script)"
+}
+
+
+def fetch_wikimedia_urls(query: str) -> list:
+    """Return all valid landscape JPG candidates from Wikimedia Commons."""
+    try:
+        resp = requests.get(
+            WIKIMEDIA_URL,
+            headers=_WIKIMEDIA_HEADERS,
+            params={
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": query,
+                "gsrnamespace": 6,
+                "gsrlimit": 15,
+                "prop": "imageinfo",
+                "iiprop": "url|size|mime",
+                "format": "json",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        pages = resp.json().get("query", {}).get("pages", {})
+        candidates = sorted(pages.values(), key=lambda x: x.get("index", 99))
+        urls = []
+        for page in candidates:
+            ii = page.get("imageinfo", [{}])[0]
+            mime = ii.get("mime", "")
+            url = ii.get("url", "")
+            w = ii.get("width", 0)
+            h = ii.get("height", 0)
+            title = page.get("title", "").lower()
+            if mime != "image/jpeg":
+                continue
+            if w <= h:
+                continue
+            if any(word in title for word in _SKIP_WORDS):
+                continue
+            urls.append(url)
+        return urls
+    except Exception as e:
+        print(f"  [Wikimedia] error: {e}")
+    return []
+
+
 def fetch_image_url(query: str) -> str:
-    """Try Pexels first, fall back to Unsplash. Returns direct image URL or ''."""
+    """Try Wikimedia first (exact landmark), fall back to Pexels then Unsplash."""
+    # Try each Wikimedia candidate until one downloads successfully
+    for url in fetch_wikimedia_urls(query):
+        try:
+            r = requests.head(url, headers=_WIKIMEDIA_HEADERS, timeout=5)
+            if r.status_code == 200:
+                return url
+        except Exception:
+            continue
+
     if PEXELS_KEY:
         try:
             resp = requests.get(
@@ -77,7 +138,7 @@ def download_as_webp(url: str, filename: str) -> bool:
     """Download image from URL, convert to webp, save to generated_images/."""
     try:
         from PIL import Image
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, headers=_WIKIMEDIA_HEADERS, timeout=15)
         resp.raise_for_status()
         img = Image.open(BytesIO(resp.content)).convert("RGB")
         img = img.resize((640, 360))
@@ -89,17 +150,19 @@ def download_as_webp(url: str, filename: str) -> bool:
         return False
 
 
-def main():
+def main(limit=None):
     conn = mysql.connector.connect(**DB_CONFIG)
     read_cursor = conn.cursor(dictionary=True)
     write_cursor = conn.cursor()
 
     read_cursor.execute(
-        "SELECT id, name, city, state FROM places WHERE image IS NULL OR image = ''"
+        "SELECT id, name, city, state, type FROM places WHERE image IS NULL OR image = ''"
     )
     rows = read_cursor.fetchall()
+    if limit:
+        rows = rows[:limit]
     total = len(rows)
-    print(f"Found {total} places with no image.\n")
+    print(f"Processing {total} places with no image.\n")
 
     done = 0
     failed = 0
@@ -108,13 +171,15 @@ def main():
         name = row["name"].title()
         city = (row["city"] or "").title()
         state = (row["state"] or "").title()
+        place_type = (row["type"] or "").title()
 
-        query = f"{name} {city} India"
+        # Include type for relevance: "Gavi Ecotourism Pathanamthitta India"
+        query = f"{name} {place_type} {city} India".strip()
         parts = [p for p in [name, city, state] if p]
         filename = "_".join(parts).replace(" ", "_") + ".webp"
         filepath = os.path.join(OUTPUT_DIR, filename)
 
-        print(f"[{i}/{total}] {name} ({city}) ...", end=" ", flush=True)
+        print(f"[{i}/{total}] {name} ({city}) [{place_type}]", end=" ... ", flush=True)
 
         # skip if file already exists on disk
         if os.path.exists(filepath):
@@ -138,7 +203,7 @@ def main():
             )
             conn.commit()
             size_kb = os.path.getsize(filepath) / 1024
-            print(f"saved ({size_kb:.0f} KB)")
+            print(f"saved ({size_kb:.0f} KB)  query: '{query}'")
             done += 1
         else:
             print("download failed.")
@@ -157,4 +222,8 @@ if __name__ == "__main__":
     if not PEXELS_KEY and not UNSPLASH_KEY:
         print("ERROR: Set PEXELS_API_KEY or UNSPLASH_ACCESS_KEY in .env")
         sys.exit(1)
-    main()
+    limit = None
+    if "--limit" in sys.argv:
+        idx = sys.argv.index("--limit")
+        limit = int(sys.argv[idx + 1])
+    main(limit=limit)
