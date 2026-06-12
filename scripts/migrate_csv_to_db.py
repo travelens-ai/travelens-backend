@@ -97,7 +97,7 @@ def migrate():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cities (
             name VARCHAR(100) PRIMARY KEY,
-            state VARCHAR(100),
+            state_id INT,
             lat DECIMAL(9,6),
             lon DECIMAL(9,6)
         )
@@ -130,18 +130,23 @@ def migrate():
     conn.commit()
 
     print("Inserting cities...")
+    # Resolve state names to state_id via the states table
+    cursor.execute("SELECT id, name FROM states")
+    state_id_by_name = {name: sid for sid, name in cursor.fetchall()}
+
     city_rows = []
     for city_raw, (lat, lon) in coords.items():
         if not isinstance(city_raw, str) or not city_raw.strip():
             continue
         city = city_raw.strip().lower()
         state = city_state.get(city_raw, city_state.get(city_raw.title(), None))
-        city_rows.append((city, state, lat, lon))
+        state_id = state_id_by_name.get(state)
+        city_rows.append((city, state_id, lat, lon))
 
     cursor.executemany(
-        """INSERT INTO cities (name, state, lat, lon)
+        """INSERT INTO cities (name, state_id, lat, lon)
            VALUES (%s, %s, %s, %s)
-           ON DUPLICATE KEY UPDATE lat=VALUES(lat), lon=VALUES(lon), state=VALUES(state)""",
+           ON DUPLICATE KEY UPDATE lat=VALUES(lat), lon=VALUES(lon), state_id=VALUES(state_id)""",
         city_rows,
     )
     conn.commit()

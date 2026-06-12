@@ -19,7 +19,9 @@ def search(q, limit=10):
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT name, state FROM cities WHERE name LIKE %s LIMIT %s",
+            "SELECT c.name, s.name AS state "
+            "FROM cities c LEFT JOIN states s ON c.state_id = s.id "
+            "WHERE c.name LIKE %s LIMIT %s",
             (q_lower + "%", limit),
         )
         cities = [

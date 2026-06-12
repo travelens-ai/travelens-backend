@@ -134,7 +134,7 @@ def init_db():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS cities (
                 name VARCHAR(100) PRIMARY KEY,
-                state VARCHAR(100),
+                state_id INT,
                 lat DECIMAL(9,6),
                 lon DECIMAL(9,6)
             )
