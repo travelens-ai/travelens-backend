@@ -1,11 +1,7 @@
 import math
-import os
-import pickle
-import time
 import threading
 
-import pandas as pd
-import requests as http_requests
+from core.db import new_connection
 
 _city_coords_cache = {}
 _city_coords_loaded = False
@@ -26,36 +22,44 @@ def is_coords_loaded():
 def load_city_coords():
     def _do_load():
         global _city_coords_cache, _city_coords_loaded
-        cache_file = "city_coords.pkl"
-        if os.path.exists(cache_file):
-            with open(cache_file, "rb") as f:
-                _city_coords_cache = pickle.load(f)
+        try:
+            conn = new_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT name, lat, lon FROM cities")
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            for row in rows:
+                if row["name"] and row["lat"] is not None:
+                    _city_coords_cache[row["name"].strip().lower()] = (float(row["lat"]), float(row["lon"]))
             _city_coords_loaded = True
-            print(f"Loaded {len(_city_coords_cache)} city coordinates from cache.")
-            return
-
-        places_df = pd.read_csv("indian_travel_places.csv")
-        cities = places_df["city"].unique()
-        for city in cities:
-            try:
-                resp = http_requests.get(
-                    f"https://nominatim.openstreetmap.org/search?q={city},India&format=json&limit=1",
-                    headers={"User-Agent": "Travelens/1.0"},
-                    timeout=5,
-                )
-                if resp.status_code == 200 and resp.json():
-                    data = resp.json()[0]
-                    _city_coords_cache[city] = (float(data["lat"]), float(data["lon"]))
-                time.sleep(1)
-            except Exception:
-                pass
-
-        with open(cache_file, "wb") as f:
-            pickle.dump(_city_coords_cache, f)
-        _city_coords_loaded = True
-        print(f"Geocoded and cached {len(_city_coords_cache)} cities.")
+            print(f"Loaded {len(_city_coords_cache)} city coordinates from DB.")
+        except Exception as e:
+            print(f"[places] Failed to load city coords from DB: {e}")
 
     threading.Thread(target=_do_load, daemon=True).start()
+
+
+def _row_to_dict(row):
+    return {
+        "city": row.get("city"),
+        "state": row.get("state"),
+        "name": row.get("name"),
+        "type": row.get("type"),
+        "distance from airport": row.get("dist_airport"),
+        "distance from bus stand": row.get("dist_bus_stand"),
+        "distance from railway station": row.get("dist_railway"),
+        "rating": row.get("rating"),
+        "no of rating": row.get("num_ratings"),
+        "best month to visit": row.get("best_month"),
+        "famous activities": row.get("famous_activities"),
+        "prefer for friends": row.get("prefer_friends"),
+        "prefer for couple": row.get("prefer_couple"),
+        "prefer for family with children": row.get("prefer_family_children"),
+        "prefer for family without children": row.get("prefer_family_no_children"),
+        "famous activities with rating": row.get("famous_activities_rating"),
+        "image": row.get("image"),
+    }
 
 
 def query_popular():
@@ -64,38 +68,60 @@ def query_popular():
 
 
 def query_trending():
-    places_df = pd.read_csv("indian_travel_places.csv")
-    places_df["no of rating"] = pd.to_numeric(places_df["no of rating"], errors="coerce").fillna(0)
-    trending_df = places_df.nlargest(10, "no of rating")
-    return trending_df.fillna("").to_dict(orient="records")
+    conn = new_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT * FROM places WHERE num_ratings IS NOT NULL ORDER BY num_ratings DESC LIMIT 10"
+        )
+        return [_row_to_dict(r) for r in cursor.fetchall()]
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def query_nearby(lat, lon):
-    places_df = pd.read_csv("indian_travel_places.csv")
-    places_df["rating"] = pd.to_numeric(places_df["rating"], errors="coerce").fillna(0)
+    conn = new_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT p.*, c.lat AS city_lat, c.lon AS city_lon "
+            "FROM places p JOIN cities c ON p.city = c.name"
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 
-    nearby_with_dist = []
-    for _, row in places_df.iterrows():
-        city = row["city"]
-        if city in _city_coords_cache:
-            dist = haversine(lat, lon, _city_coords_cache[city][0], _city_coords_cache[city][1])
-            nearby_with_dist.append((dist, row.fillna("").to_dict()))
+    with_dist = []
+    for row in rows:
+        if row["city_lat"] is not None:
+            dist = haversine(lat, lon, float(row["city_lat"]), float(row["city_lon"]))
+            with_dist.append((dist, row))
 
-    nearby_with_dist.sort(key=lambda x: x[0])
-    return [place for _, place in nearby_with_dist[:10]]
+    with_dist.sort(key=lambda x: x[0])
+    return [_row_to_dict(r) for _, r in with_dist[:10]]
 
 
 def query_weekend(lat, lon):
-    places_df = pd.read_csv("indian_travel_places.csv")
-    places_df["rating"] = pd.to_numeric(places_df["rating"], errors="coerce").fillna(0)
+    conn = new_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT p.*, c.lat AS city_lat, c.lon AS city_lon "
+            "FROM places p JOIN cities c ON p.city = c.name"
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 
-    nearby_with_dist = []
-    for _, row in places_df.iterrows():
-        city = row["city"]
-        if city in _city_coords_cache:
-            dist = haversine(lat, lon, _city_coords_cache[city][0], _city_coords_cache[city][1])
-            nearby_with_dist.append((dist, row.fillna("").to_dict()))
+    candidates = []
+    for row in rows:
+        if row["city_lat"] is not None:
+            dist = haversine(lat, lon, float(row["city_lat"]), float(row["city_lon"]))
+            if dist <= 300:
+                candidates.append((dist, row))
 
-    weekend_candidates = [(d, p) for d, p in nearby_with_dist if d <= 300]
-    weekend_candidates.sort(key=lambda x: float(x[1].get("rating", 0) or 0), reverse=True)
-    return [place for _, place in weekend_candidates[:10]]
+    candidates.sort(key=lambda x: float(x[1].get("rating") or 0), reverse=True)
+    return [_row_to_dict(r) for _, r in candidates[:10]]
