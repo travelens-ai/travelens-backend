@@ -1,1 +1,1 @@
-web: python3 app.py
+web: .venv/bin/python3 src/app.py

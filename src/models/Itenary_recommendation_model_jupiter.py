@@ -12,8 +12,8 @@ from numpy.linalg import norm
 import schedule
 import time
 import threading
-from generate_images import ImageGenerator
-from api_integrations import GooglePlacesClient, ImageSearchClient
+from integrations.generate_images import ImageGenerator
+from integrations.api_integrations import GooglePlacesClient, ImageSearchClient
 import os
 import random
 
