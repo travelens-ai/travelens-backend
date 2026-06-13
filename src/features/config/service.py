@@ -1,0 +1,164 @@
+"""Static app configuration served to the client.
+
+Drives onboarding pages, screen copy, and the bottom tab bar. Pure data — no DB
+or external calls — so the client can render screens without hard-coding strings.
+"""
+
+APP_CONFIG = {
+    "pages": [
+        {
+            "type": "GETTING_STARTED",
+            "bg": "welcome-bg",
+            "title": "Discover India at your own pace",
+            "desc": "Travel your way and discover, enjoy and explore India with comfort.",
+            "ctaLabel": "Get Started",
+            "isFirstTimeUser": False,
+        },
+        {
+            "type": "LAUNCH",
+            "bg": "",
+            "img": "introduce-yourself",
+            "isFirstTimeUser": False,
+            "apiResponseKey": "gender",
+            "title": "Introduce Yourself",
+            "desc": "Fill out the rest of your details so people know a little more about you",
+            "ctaLabel": "Next",
+            "skipLabel": "Skip",
+            "cta": [
+                {"size": "card", "img": "male", "label": "Male", "value": "male"},
+                {"size": "card", "img": "female", "label": "Female", "value": "female"},
+                {
+                    "size": "card",
+                    "img": "not_specified",
+                    "label": "Prefer not to say",
+                    "value": "not_specified",
+                },
+            ],
+        },
+        {
+            "type": "LAUNCH",
+            "bg": "",
+            "isFirstTimeUser": False,
+            "apiResponseKey": "age",
+            "title": "How old are you?",
+            "desc": "Tell us your age so we can personalize your travel experience",
+            "ctaLabel": "Next",
+            "skipLabel": "Skip",
+            "inputType": "number",
+            "placeholder": "Enter your age",
+        },
+        {
+            "type": "LAUNCH",
+            "bg": "",
+            "isFirstTimeUser": False,
+            "apiResponseKey": "interest",
+            "title": "Let's select your interests.",
+            "desc": "Please select two or more to proceed.",
+            "ctaLabel": "Continue",
+            "skipLabel": "Skip",
+            "cta": [
+                {"size": "text", "label": "Aviation"},
+                {"size": "text", "label": "Art"},
+                {"size": "text", "label": "Cars"},
+                {"size": "text", "label": "Baking"},
+                {"size": "text", "label": "Botany"},
+                {"size": "text", "label": "Crypto"},
+                {"size": "text", "label": "Real Estate"},
+                {"size": "text", "label": "Technology"},
+                {"size": "text", "label": "Fashion"},
+                {"size": "text", "label": "Dogs"},
+                {"size": "text", "label": "Birds"},
+                {"size": "text", "label": "Health care"},
+                {"size": "text", "label": "Geography"},
+                {"size": "text", "label": "Finance"},
+                {"size": "text", "label": "Cats"},
+                {"size": "text", "label": "LGBTQ"},
+                {"size": "text", "label": "Mental Health"},
+                {"size": "text", "label": "Programming"},
+                {"size": "text", "label": "Cinema"},
+                {"size": "text", "label": "Sports"},
+                {"size": "text", "label": "Travel"},
+                {"size": "text", "label": "Gaming"},
+                {"size": "text", "label": "Photography"},
+                {"size": "text", "label": "Design"},
+                {"size": "text", "label": "UFO"},
+                {"size": "text", "label": "Music"},
+            ],
+        },
+        {
+            "type": "HOME",
+            "bg": "",
+            "texts": {
+                "greeting": "Hi",
+                "defaultName": "Traveler",
+                "tripPlannerTitle": "AI Trip Planner",
+                "tripPlannerSubtitle": "Let our AI build a personalized itinerary just for you",
+                "tripPlannerCta": "Start Planning",
+                "searchPlaceholder": "Search destinations...",
+            },
+        },
+        {
+            "type": "AI_TRIP_PLANNER",
+            "bg": "",
+            "texts": {
+                "title": "Plan Your Trip",
+                "subtitle": "Tell us where you want to go",
+                "ctaLabel": "Next",
+            },
+        },
+        {
+            "type": "SEARCH",
+            "bg": "",
+            "texts": {
+                "title": "Search",
+                "placeholder": "Where do you want to go?",
+                "emptyState": "Start typing to search destinations",
+            },
+        },
+        {
+            "type": "HISTORY",
+            "bg": "",
+            "texts": {
+                "title": "Trip History",
+                "emptyTitle": "Trip History",
+                "emptySubtitle": "Your past itineraries will appear here",
+            },
+        },
+        {
+            "type": "FAVORITE",
+            "bg": "",
+            "texts": {
+                "title": "Favorites",
+                "emptyTitle": "Favorites",
+                "emptySubtitle": "Your favorite destinations will appear here",
+            },
+        },
+        {
+            "type": "PROFILE",
+            "bg": "",
+            "texts": {
+                "title": "My Account",
+                "headerLink": "Help & Settings",
+                "loginTitle": "Login to Travelens",
+                "loginSubtitle": "Save your trips, get personalized recommendations and more",
+                "loginCta": "Log In",
+                "googleCta": "Continue with Google",
+                "signupPrompt": "New here?",
+                "signupLink": "Create Account",
+                "editCta": "Edit Profile",
+                "logoutCta": "Log Out",
+            },
+        },
+    ],
+    "tabs": [
+        {"name": "Home", "icon": "home"},
+        {"name": "Plan", "icon": "airplane"},
+        {"name": "Favorite", "icon": "heart"},
+        {"name": "History", "icon": "time"},
+        {"name": "Profile", "icon": "person"},
+    ],
+}
+
+
+def get_config():
+    return APP_CONFIG
