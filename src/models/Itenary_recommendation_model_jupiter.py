@@ -765,7 +765,7 @@ class ItenaryRecommendationSystem:
                     # Upload image
                     with open(image_path, 'rb') as image_file:
                         response = requests.post(
-                            "https://www.ultrazynix.com/travelens/upload.php",
+                            "https://travelens.in/app/upload.php",
                             files={'file': image_file}
                         )
                         if response.status_code == 200:

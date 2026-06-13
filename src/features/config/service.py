@@ -8,7 +8,7 @@ APP_CONFIG = {
     "pages": [
         {
             "type": "GETTING_STARTED",
-            "bg": "welcome-bg",
+            "bg": "https://travelens.in/app/assets/welcome-bg.png",
             "title": "Discover India at your own pace",
             "desc": "Travel your way and discover, enjoy and explore India with comfort.",
             "ctaLabel": "Get Started",
@@ -17,6 +17,7 @@ APP_CONFIG = {
         {
             "type": "LAUNCH",
             "bg": "",
+            "topImage":"",
             "img": "introduce-yourself",
             "isFirstTimeUser": False,
             "apiResponseKey": "gender",
