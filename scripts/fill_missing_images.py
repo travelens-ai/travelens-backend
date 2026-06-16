@@ -231,3 +231,4 @@ if __name__ == "__main__":
         idx = sys.argv.index("--limit")
         limit = int(sys.argv[idx + 1])
     main(limit=limit)
+    
