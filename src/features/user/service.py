@@ -14,13 +14,14 @@ def add_favorite(user_id, itinerary_id):
             return False, ("error", "Itinerary not found", 404)
 
         cursor.execute(
-            "INSERT INTO favorites (user_id, itinerary_id) VALUES (%s, %s)",
+            "INSERT IGNORE INTO favorites (user_id, itinerary_id) VALUES (%s, %s)",
             (str(user_id), itinerary_id),
         )
         conn.commit()
+        if cursor.rowcount == 0:
+            # Already a favorite — no-op, treat as success.
+            return True, ("success", "Already in favorites", 200)
         return True, ("success", "Added to favorites", 201)
-    except mysql.connector.IntegrityError:
-        return False, ("error", "Already in favorites", 409)
     except mysql.connector.Error as e:
         conn.rollback()
         return False, ("error", str(e), 500)
@@ -81,10 +82,13 @@ def add_history(user_id, itinerary_id):
             return False, ("error", "Itinerary not found", 404)
 
         cursor.execute(
-            "INSERT INTO history (user_id, itinerary_id) VALUES (%s, %s)",
+            "INSERT IGNORE INTO history (user_id, itinerary_id) VALUES (%s, %s)",
             (str(user_id), itinerary_id),
         )
         conn.commit()
+        if cursor.rowcount == 0:
+            # Already in history — no-op, treat as success.
+            return True, ("success", "Already in history", 200)
         return True, ("success", "Added to history", 201)
     except mysql.connector.Error as e:
         conn.rollback()

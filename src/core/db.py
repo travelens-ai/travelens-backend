@@ -142,6 +142,7 @@ def init_db():
                 user_id VARCHAR(255) NOT NULL,
                 itinerary_id INT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_history (user_id, itinerary_id),
                 FOREIGN KEY (itinerary_id) REFERENCES itineraries(id) ON DELETE CASCADE
             )
         """)
