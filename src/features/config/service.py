@@ -1,8 +1,11 @@
-"""Static app configuration served to the client.
+"""App configuration served to the client.
 
-Drives onboarding pages, screen copy, and the bottom tab bar. Pure data — no DB
-or external calls — so the client can render screens without hard-coding strings.
+Drives onboarding pages, screen copy, and the bottom tab bar. The lookup lists
+(group types, food preferences, activities) are read from the database so they
+can be changed without a deploy.
 """
+
+from core.db import fetch_dicts
 
 APP_CONFIG = {
     "pages": [
@@ -161,5 +164,41 @@ APP_CONFIG = {
 }
 
 
+def _load_lookups():
+    """Fetch the lookup lists from the database. Returns empty lists for any
+    table that errors so the rest of the config still serves."""
+    try:
+        group_types = [r["name"] for r in fetch_dicts(
+            "SELECT name FROM group_types ORDER BY id"
+        )]
+    except Exception as e:
+        print(f"[config] failed to load group_types: {e}")
+        group_types = []
+
+    try:
+        food_preferences = [r["name"] for r in fetch_dicts(
+            "SELECT name FROM food_preferences ORDER BY id"
+        )]
+    except Exception as e:
+        print(f"[config] failed to load food_preferences: {e}")
+        food_preferences = []
+
+    try:
+        activities = [
+            {"id": r["ref_id"], "name": r["name"], "icon": r["icon"]}
+            for r in fetch_dicts("SELECT ref_id, name, icon FROM activities ORDER BY id")
+        ]
+    except Exception as e:
+        print(f"[config] failed to load activities: {e}")
+        activities = []
+
+    return group_types, food_preferences, activities
+
+
 def get_config():
-    return APP_CONFIG
+    group_types, food_preferences, activities = _load_lookups()
+    config = dict(APP_CONFIG)
+    config["group_types"] = group_types
+    config["food_preferences"] = food_preferences
+    config["activities"] = activities
+    return config

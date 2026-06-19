@@ -14,7 +14,12 @@ def _to_url(name):
         return name
     if name.startswith("http://") or name.startswith("https://"):
         return name
-    return IMAGE_BASE_URL + name
+    # Image files have no spaces in their stored names; strip leading/trailing
+    # whitespace and remove any regular or non-breaking ( ) spaces that
+    # slipped in, so the resulting URL is valid without needing encoding.
+    # Mirrors the Android fix: .trim().replace(/ /g, '').
+    cleaned = name.strip().replace(" ", "").replace("\u00A0", "")
+    return IMAGE_BASE_URL + cleaned
 
 
 def _walk(node):

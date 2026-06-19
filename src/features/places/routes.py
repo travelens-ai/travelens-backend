@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify
 
 import features.places.service as places_service
 from features.itinerary.service import is_initialized, loading_response
+from core.images import with_image_urls
 
 places_bp = Blueprint("places", __name__)
 
@@ -68,18 +69,18 @@ def get_places():
     try:
         if place_type == "popular":
             result = places_service.query_popular()
-            return jsonify({"status": "success", "places": result}), 200
+            return jsonify({"status": "success", "places": with_image_urls(result)}), 200
 
         if place_type == "trending":
             result = places_service.query_trending()
-            return jsonify({"status": "success", "places": result}), 200
+            return jsonify({"status": "success", "places": with_image_urls(result)}), 200
 
         if place_type == "nearby":
             result = places_service.query_nearby(lat, long)
-            return jsonify({"status": "success", "places": result}), 200
+            return jsonify({"status": "success", "places": with_image_urls(result)}), 200
 
         result = places_service.query_weekend(lat, long)
-        return jsonify({"status": "success", "places": result}), 200
+        return jsonify({"status": "success", "places": with_image_urls(result)}), 200
 
     except Exception as e:
         traceback.print_exc()

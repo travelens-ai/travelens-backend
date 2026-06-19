@@ -236,6 +236,47 @@ class ItenaryRecommendationSystem:
                 result[row["name"]].append(row["image"])
         return result
 
+    def _search_images_by_keywords(self, keywords, limit=5):
+        """Fallback image lookup: when a place has no mapped image, search the
+        `images` table by keyword. Image names encode `Place_City_State` (e.g.
+        'Hawa_Mahal_Jaipur_Rajasthan...webp'), so we LIKE-match each keyword
+        (place name, then city, then state) against image_name. Keywords are
+        tried in the given order (most specific first) and results accumulate,
+        deduped, until `limit` images are collected. Returns a list of
+        image_name strings (possibly empty)."""
+        found = []
+        for raw in keywords:
+            if len(found) >= limit:
+                break
+            kw = str(raw).strip() if raw is not None else ""
+            if not kw:
+                continue
+            # Names use spaces; image_name uses underscores — normalize.
+            token = kw.lower().replace(" ", "_")
+            escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            try:
+                rows = fetch_dicts(
+                    "SELECT image_name FROM images WHERE LOWER(image_name) LIKE %s "
+                    "ORDER BY id LIMIT %s",
+                    ("%" + escaped + "%", limit),
+                )
+            except Exception as e:
+                print(f"  _search_images_by_keywords failed for {kw!r} ({e})")
+                continue
+            for row in rows:
+                name = row["image_name"]
+                if name and name not in found:
+                    found.append(name)
+                    if len(found) >= limit:
+                        break
+        return found
+
+    def _search_image_by_keywords(self, keywords):
+        """Single-image variant of _search_images_by_keywords: returns the first
+        matching image_name, or None if nothing matches."""
+        images = self._search_images_by_keywords(keywords, limit=1)
+        return images[0] if images else None
+
     def _load_hotels_df(self):
         """Load hotels from the DB (columns already match the CSV). Falls back
         to the CSV if the DB is unavailable or returns no rows."""
@@ -546,11 +587,22 @@ class ItenaryRecommendationSystem:
                 str(name).strip().lower(): img
                 for name, img in place_image_map.items()
             }
+            itin_city = itinerary.get('city')
+            itin_state = itinerary.get('state')
             for day in itinerary.get('itinerary', []):
                 for place in day.get('places_to_visit', []):
-                    key = str(place.get('name', '')).strip().lower()
+                    place_name = str(place.get('name', '')).strip()
+                    key = place_name.lower()
                     image = normalized_image_map.get(key)
-                    if not image or pd.isna(image):
+                    if not image or (not isinstance(image, list) and pd.isna(image)):
+                        # No mapped image — search the images table by keyword,
+                        # most specific first: this place's name, then the
+                        # location ("City, State"), then the itinerary city/state.
+                        location = place.get('location', '') or ''
+                        loc_parts = [p.strip() for p in str(location).split(',') if p.strip()]
+                        keywords = [place_name] + loc_parts + [itin_city, itin_state]
+                        image = self._search_image_by_keywords(keywords)
+                    if not image or (not isinstance(image, list) and pd.isna(image)):
                         image = 'default' + str(random.randint(1, 7)) + '.webp'
                     place['image'] = image
 
@@ -560,6 +612,13 @@ class ItenaryRecommendationSystem:
             main_images = self._get_images_for_places([placename]).get(
                 str(placename).strip().lower(), []
             )
+            if not main_images:
+                # Search the images table by the destination name / city / state,
+                # collecting up to 5 images for the gallery.
+                main_images = self._search_images_by_keywords(
+                    [placename, itinerary.get('city'), itinerary.get('state')],
+                    limit=5,
+                )
             if not main_images and main_single_image:
                 main_images = [main_single_image]
             itinerary['images'] = main_images
