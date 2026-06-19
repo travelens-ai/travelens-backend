@@ -106,3 +106,35 @@ def store_itinerary(cache_key, user_preferences, result):
             print(f"Failed to store itinerary: {db_err}")
     _itinerary_cache[cache_key] = (time.time(), result, itinerary_id)
     return itinerary_id
+
+
+def update_itinerary(cache_key, itinerary_id, user_preferences, result):
+    """Overwrite an existing itinerary row's request/response JSON after a
+    successful edit. Returns the itinerary_id if the row was updated, else None
+    (e.g. the id doesn't exist). Falls back to inserting a new row when no id is
+    provided."""
+    if not itinerary_id:
+        return store_itinerary(cache_key, user_preferences, result)
+
+    updated = False
+    if is_db_ready():
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE itineraries SET request_json = %s, response_json = %s, status = %s WHERE id = %s",
+                (json.dumps(user_preferences), json.dumps(_prune_result_for_storage(result)), "success", itinerary_id),
+            )
+            conn.commit()
+            updated = cursor.rowcount > 0
+            cursor.close()
+        except Exception as db_err:
+            print(f"Failed to update itinerary {itinerary_id}: {db_err}")
+
+    if not updated:
+        # Row not found (or DB write failed) — fall back to a fresh insert so
+        # the edit isn't lost, and return the new id.
+        return store_itinerary(cache_key, user_preferences, result)
+
+    _itinerary_cache[cache_key] = (time.time(), result, itinerary_id)
+    return itinerary_id

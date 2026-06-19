@@ -13,7 +13,7 @@ import schedule
 import time
 import threading
 from integrations.generate_images import ImageGenerator
-from integrations.api_integrations import GooglePlacesClient, ImageSearchClient
+from integrations.api_integrations import GooglePlacesClient, ImageSearchClient, NominatimClient
 from core.db import fetch_dicts, new_connection
 import os
 import random
@@ -38,6 +38,7 @@ class ItenaryRecommendationSystem:
         self.restaurants_df = None
         self.places_client = GooglePlacesClient()
         self.image_client = ImageSearchClient()
+        self.geocoder = NominatimClient()
 
     def initialize(self):
         """Initialize models and load data"""
@@ -544,6 +545,78 @@ class ItenaryRecommendationSystem:
                 restaurants,
             )
 
+            return self._finalize_itinerary(itinerary, places)
+
+        except (KeyError, IndexError, TypeError) as e:
+            print("Error while processing:", e)
+            return {
+                'status': 'error',
+                'message': str(e)
+            }
+
+    def edit_itinerary(self, user_preferences):
+        """Regenerate an itinerary that MUST include an explicit list of places.
+
+        Accepts the same payload as `generate_itinerary` plus one extra key,
+        `places` — a list of place names (or dicts with a `name`) that must all
+        appear in the resulting itinerary. Uses a dedicated edit prompt and then
+        runs the exact same post-processing (images, persistence, similar
+        places) as generation.
+        """
+        try:
+            user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
+            user_preferences['budget'] = user_preferences.get('budget', "")
+
+            # The extra payload: places that MUST be included in the itinerary.
+            edit_places = user_preferences.get('places', []) or []
+            # Normalize to a list of plain name strings (accept strings or dicts).
+            place_names = []
+            for p in edit_places:
+                if isinstance(p, dict):
+                    name = p.get('name') or p.get('placename') or ''
+                else:
+                    name = str(p)
+                name = name.strip()
+                if name and name not in place_names:
+                    place_names.append(name)
+
+            places = self._get_place_recommendations(user_preferences)
+            places = self._enrich_place_images(places)
+            hotels = self._get_hotel_recommendations(user_preferences)
+            restaurants = self._get_restaurant_recommendations(user_preferences)
+
+            prompt = self.generate_edit_itinerary_prompt(
+                user_preferences, places, restaurants, hotels, place_names
+            )
+            print(f"Edit prompt length: {len(prompt)} chars")
+
+            response = self.client.responses.create(
+                model=self.chat_deployment,
+                input=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.output_text
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            itinerary = json.loads(response_text.strip())
+
+            return self._finalize_itinerary(itinerary, places)
+
+        except (KeyError, IndexError, TypeError) as e:
+            print("Error while processing edit:", e)
+            return {
+                'status': 'error',
+                'message': str(e)
+            }
+
+    def _finalize_itinerary(self, itinerary, places):
+        """Shared post-processing for generated/edited itineraries: resolves
+        images for each place and the destination gallery, persists new places,
+        attaches similar-place images, cleans NaNs, and builds the response."""
+        try:
             if places.empty:
                 places = self.getEditPlaces(itinerary['city'] , itinerary['state'])
             # Merge places, popular destinations, and similar places into a single array
@@ -625,10 +698,6 @@ class ItenaryRecommendationSystem:
 
             threading.Thread(target=self.save_similar_places, args=(itinerary['similar_places'],), daemon=True).start()
 
-            # Persist any place the LLM returned that isn't yet in our places
-            # table (off the request thread so the response isn't delayed).
-            threading.Thread(target=self.save_new_places, args=(itinerary,), daemon=True).start()
-
             # Update similar_places with images from similar_places.pkl
             try:
                 for place in itinerary['similar_places']:
@@ -640,6 +709,19 @@ class ItenaryRecommendationSystem:
                         place['image'] = 'default' + str(random.randint(1, 7)) + '.webp'
             except FileNotFoundError:
                 print("similar_places.pkl not found. Skipping image update for similar places.")
+
+            # Attach lat/lon/full_address to every place, hotel and restaurant —
+            # from the DB when we have it, otherwise geocode via Nominatim and
+            # store the result back on the row so the response and DB match.
+            # Done BEFORE save_new_places so newly-inserted rows carry the same
+            # coordinates that go out in the response.
+            self._attach_lat_long(itinerary)
+
+            # Persist any place the LLM returned that isn't yet in our places
+            # table (off the request thread so the response isn't delayed). The
+            # itinerary now has lat/lon/full_address attached, so new rows are
+            # inserted with the same values returned in the response.
+            threading.Thread(target=self.save_new_places, args=(itinerary,), daemon=True).start()
 
             # Convert NaN values to empty strings using deep search
             itinerary = json.loads(json.dumps(itinerary, default=lambda x: '' if pd.isna(x) else x))
@@ -659,6 +741,107 @@ class ItenaryRecommendationSystem:
                 'status': 'error',
                 'message': str(e)
             }
+
+    def _db_lat_long(self, table, name):
+        """Look up lat/lon/full_address for a row by name in
+        places/hotels/restaurants. Returns a dict only when lat & lon are both
+        present, else None."""
+        if not name:
+            return None
+        name_col = "property_name" if table == "hotels" else "name"
+        try:
+            rows = fetch_dicts(
+                f"SELECT lat, lon, full_address FROM {table} "
+                f"WHERE LOWER({name_col}) = %s AND lat IS NOT NULL AND lon IS NOT NULL "
+                f"LIMIT 1",
+                (str(name).strip().lower(),),
+            )
+        except Exception as e:
+            print(f"  _db_lat_long failed for {name!r} in {table} ({e})")
+            return None
+        if rows:
+            return {
+                "lat": float(rows[0]["lat"]),
+                "lon": float(rows[0]["lon"]),
+                "full_address": rows[0].get("full_address") or "",
+            }
+        return None
+
+    def _save_lat_long_to_db(self, table, name, lat, lon, full_address):
+        """Write geocoded lat/lon/full_address back onto the matching DB row so
+        we never geocode it again. Updates only rows that currently lack coords;
+        no-op if the entity isn't in the table."""
+        if not name:
+            return
+        name_col = "property_name" if table == "hotels" else "name"
+        try:
+            conn = new_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE {table} SET lat = %s, lon = %s, full_address = %s "
+                f"WHERE LOWER({name_col}) = %s AND (lat IS NULL OR lon IS NULL)",
+                (lat, lon, full_address, str(name).strip().lower()),
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"  _save_lat_long_to_db failed for {name!r} in {table} ({e})")
+
+    def _resolve_lat_long(self, table, name, location_hint=""):
+        """Resolve lat/lon/full_address for an entity: prefer the DB value, fall
+        back to OpenStreetMap Nominatim. On a successful geocode, persist the
+        result back to the DB. Returns a dict {'lat','lon','full_address'} or
+        None."""
+        coords = self._db_lat_long(table, name)
+        if coords is not None:
+            return coords
+
+        query = f"{name}, {location_hint}".strip().strip(",") if location_hint else str(name or "")
+        result = self.geocoder.geocode(query)
+        if result is None:
+            return None
+
+        # Persist back to the DB so future itineraries skip the API.
+        self._save_lat_long_to_db(
+            table, name, result["lat"], result["lon"], result.get("full_address", "")
+        )
+        return result
+
+    def _attach_lat_long(self, itinerary):
+        """Populate `lat`/`lon`/`full_address` on every place, restaurant and
+        hotel in the itinerary. DB first, Nominatim as fallback. Caches within
+        this call so the same entity isn't resolved twice."""
+        seen = {}
+
+        def resolve(table, name, location_hint=""):
+            key = (table, str(name).strip().lower())
+            if key not in seen:
+                seen[key] = self._resolve_lat_long(table, name, location_hint)
+            return seen[key]
+
+        def apply(entity, table, default_hint):
+            res = resolve(table, entity.get('name'), entity.get('location') or default_hint)
+            if res:
+                entity['lat'] = res['lat']
+                entity['lon'] = res['lon']
+                entity['full_address'] = res.get('full_address', '')
+            else:
+                entity['lat'] = None
+                entity['lon'] = None
+                entity['full_address'] = ''
+
+        city = itinerary.get('city') or ''
+        state = itinerary.get('state') or ''
+        default_hint = ", ".join([p for p in [city, state] if p])
+
+        for day in itinerary.get('itinerary', []):
+            for place in day.get('places_to_visit', []):
+                apply(place, 'places', default_hint)
+            for rest in day.get('restaurants', []):
+                apply(rest, 'restaurants', default_hint)
+            for hotel in day.get('hotels', []):
+                apply(hotel, 'hotels', default_hint)
 
     def _get_place_recommendations(self, user_preferences):
         """Get recommended places based on user preferences"""
@@ -871,7 +1054,8 @@ class ItenaryRecommendationSystem:
           - 2–3 restaurants (match cuisine and location).
           - 2–3 hotels (low, mid, and high budget options).
         6. For each place, include:
-          - `name`, `location`, `reason`, `activities`, and estimated visit time (e.g., "1.5–2 hours").
+          - `name`, `location`, `reason`, `activities`, `rating`, and estimated visit time (e.g., "1.5–2 hours").
+          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. "4.5").
         7. For each restaurant, include:
           - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
           - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
@@ -910,6 +1094,7 @@ class ItenaryRecommendationSystem:
                   "location": "City, State",
                   "reason": "Matches your interest in [e.g. temples, nature]",
                   "activities": ["Activity 1", "Activity 2"],
+                  "rating": "X.X",
                   "duration": "1.5–2 hours",
                 }}
               ],
@@ -939,6 +1124,164 @@ class ItenaryRecommendationSystem:
           ],
           "name": "Place Name",
           "description": "Short description of the place",
+          "price_estimated_range": "give the total price range estimated per head. It should be in the range of ${user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
+          "state": "State Name",
+          "city": "City Name",
+          "similar_places": [
+              {{
+                "placename": "Alternative Destination 1",
+                "description": "Why this is a good fit based on user's preferences",
+                "state": "State Name",
+                "price_estimated_range": "same logic as above"
+              }},
+              {{
+                "placename": "Alternative Destination 2",
+                "description": "Why this is a good fit based on user's preferences",
+                "state": "State Name",
+                "price_estimated_range": "same logic as above"
+              }}
+            ]
+        }}
+        """
+
+        return textwrap.dedent(prompt)
+
+    def generate_edit_itinerary_prompt(self, user_preferences, top_places, top_restaurants, top_hotels, must_include_places):
+        must_include_block = "\n".join(f"          - {name}" for name in must_include_places) or "          (none specified)"
+        prompt = f"""
+        🚨 VERY IMPORTANT: You must follow the output format strictly. DO NOT modify, rename, add, or remove any key in the JSON structure below.
+        For example: `approx_cost` ≠ `cost`, `placename` ≠ `name`, `price_range` ≠ `budget`.
+        Use the **exact keys** from the format shown — even a small change will break the output. This is the top priority rule.
+
+        ---
+
+        You are a smart AI that EDITS / REGENERATES a personalized multi-day travel itinerary.
+
+        This is an EDIT request. The user already has an itinerary and now wants it rebuilt so that a
+        specific set of places they picked are **guaranteed to be part of the plan**. Rebuild the full
+        itinerary from the user preferences below, but treat the "Places that MUST be included" list as
+        a hard requirement.
+
+        Use the information provided below: user preferences, recommended places, real restaurant and hotel datasets.
+        If no data is available, use your general travel knowledge to add relevant places, hotels, or restaurants — but always follow the format strictly.
+
+        ---
+
+        ### 👤 User Preferences
+        - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
+        - Places of interest: {user_preferences['places_of_interest']}
+        - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
+        - Food preferences: {user_preferences['food_preferences']}
+        - Starting location: {user_preferences['user_location']}
+        - Travel month: {user_preferences['current_month']}
+        - Trip type: {user_preferences['trip_type']}
+        - Trip duration: {user_preferences['trip_duration']} days
+        - Suggested places: {user_preferences['suggested_places']}
+        - Budget: {user_preferences['budget']}
+
+        ---
+
+        ### ✅ Places that MUST be included (hard requirement for this edit)
+{must_include_block}
+
+        ---
+
+        ### 📍 Recommended Places (Use only these when available!)
+        {top_places}
+
+        ---
+
+        ### 🍽️ Restaurants Dataset (Use only real data when available)
+        {top_restaurants}
+
+        ---
+
+        ### 🏨 Hotels Dataset (Use only real data when available)
+        {top_hotels}
+
+        ---
+
+        ### 🧠 Rules
+
+        1. The final output **must be 100% valid JSON**. Strictly no broken or partial JSON.
+        2. **Every place in the "Places that MUST be included" list MUST appear** in the itinerary's `places_to_visit` across the days. This is non-negotiable — do not drop, rename, or merge any of them.
+        3. Distribute the must-include places sensibly across days, grouping geographically close places together and keeping a linear travel flow.
+        4. If the must-include places do not all fit within {user_preferences['trip_duration']} days, **extend the trip duration** and generate the itinerary for the new total number of days so that all of them are included. In that case you MUST also:
+          - Set the top-level `total_days` to the new (increased) number of days.
+          - Add a clear, friendly `notes` message explaining that the trip was extended from {user_preferences['trip_duration']} days to the new number of days to fit all the selected places.
+          If everything fits within {user_preferences['trip_duration']} days, set `total_days` to {user_preferences['trip_duration']} and set `notes` to an empty string "".
+        5. After placing all must-include places, you may add other relevant places (from the dataset or your knowledge) so each day has 2–3 geographically close places to visit.
+        6. If `suggested_places` are provided, include them as well.
+        7. If datasets do not have enough entries, **use GenAI knowledge** to fill missing places, restaurants, or hotels.
+        8. Each day must include:
+          - 2–3 geographically close places to visit (including any must-include places assigned to that day).
+          - 2–3 restaurants (match cuisine and location).
+          - 2–3 hotels (low, mid, and high budget options).
+        9. For each place, include:
+          - `name`, `location`, `reason`, `activities`, `rating`, and estimated visit time (e.g., "1.5–2 hours").
+          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. "4.5").
+        10. For each restaurant, include:
+          - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
+          - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
+        11. For each hotel, include:
+          - `name`, `type`, `price_range`, `rating`, `location`, `reason`, and a `link` (either from dataset or generated if missing).
+          - If user budget is available, ensure the hotel fits within the budget range: low (₹1000–₹3000), mid (₹3000–₹8000), high (₹8000+). If no budget is specified, select a range of hotel types.
+        12. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
+        13. Avoid repeating places, hotels, or restaurants on different days.
+        14. Keep the travel flow linear — do not plan A → B → A routes.
+        15. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
+        16. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
+        17. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
+        18. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        19. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on the user's `places_of_interest`, preferred activities, travel group type, food preferences, user location, and trip type. Places should be from the indian_travel_places dataset.
+        20. Don't add NaN if any image or name is not available. Just leave it blank.
+
+        ---
+
+        ### 📦 Output Format (JSON)
+
+        {{
+          "itinerary": [
+            {{
+              "day": 1,
+              "places_to_visit": [
+                {{
+                  "name": "Place Name",
+                  "location": "City, State",
+                  "reason": "Matches your interest in [e.g. temples, nature]",
+                  "activities": ["Activity 1", "Activity 2"],
+                  "rating": "X.X",
+                  "duration": "1.5–2 hours",
+                }}
+              ],
+              "restaurants": [
+                {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX", // if budget is given, match cost range accordingly; else choose normally
+                  "rating": "X.X",
+                  "location": "Area Name",
+                  "reason": "Matches your food preference: {user_preferences['food_preferences']}"
+                }}
+              ],
+              "hotels": [
+                {{
+                  "name": "Hotel Name",
+                  "type": "Hotel Type",
+                  "price_range": "₹XXX", // match this to budget: low (1000–3000) | mid (3000–8000) | high (8000+) — auto select if no budget
+                  "rating": "X.X",
+                  "location": "City",
+                  "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
+                  "link": "Add valid Page URL from hotel dataset or generated link"
+                }}
+              ]
+            }}
+            // Repeat same structure for next days — NO comma after the last day.
+          ],
+          "name": "Place Name",
+          "description": "Short description of the place",
+          "total_days": {user_preferences['trip_duration']}, // the actual number of days in this itinerary (increase if you extended the trip to fit all must-include places)
+          "notes": "", // empty string if no change; otherwise explain that the trip was extended to fit all selected places
           "price_estimated_range": "give the total price range estimated per head. It should be in the range of ${user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
           "state": "State Name",
           "city": "City Name",
@@ -1060,14 +1403,15 @@ class ItenaryRecommendationSystem:
             for place in day.get('places_to_visit', []):
                 name = str(place.get('name', '')).strip()
                 if name:
-                    candidates.append((name, place.get('location', ''), place.get('activities')))
+                    candidates.append((name, place.get('location', ''), place.get('activities'),
+                                       place.get('lat'), place.get('lon'), place.get('full_address')))
         if not candidates:
             return
 
         cursor.execute("SELECT LOWER(name) FROM places")
         existing = {row[0] for row in cursor.fetchall()}
         inserted, seen = 0, set()
-        for name, location, activities in candidates:
+        for name, location, activities, lat, lon, full_address in candidates:
             key = name.lower()
             if key in existing or key in seen:
                 continue
@@ -1077,8 +1421,9 @@ class ItenaryRecommendationSystem:
                 city_id = self._resolve_city_id(cursor, city, state)
                 famous = ", ".join(activities) if isinstance(activities, list) and activities else None
                 cursor.execute(
-                    "INSERT INTO places (name, city_id, famous_activities) VALUES (%s, %s, %s)",
-                    (key, city_id, famous),
+                    "INSERT INTO places (name, city_id, famous_activities, lat, lon, full_address) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (key, city_id, famous, lat, lon, full_address or None),
                 )
                 inserted += 1
             except Exception as e:
@@ -1109,11 +1454,13 @@ class ItenaryRecommendationSystem:
                 city, state = self._parse_city_state(hotel.get('location', ''))
                 cursor.execute(
                     """INSERT INTO hotels
-                       (property_name, property_type, city, state, site_review_rating, pageurl)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                       (property_name, property_type, city, state, site_review_rating, pageurl, lat, lon, full_address)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (name, str(hotel.get('type', '')).strip() or None,
                      city, state, self._to_decimal(hotel.get('rating')),
-                     str(hotel.get('link', '')).strip() or None),
+                     str(hotel.get('link', '')).strip() or None,
+                     hotel.get('lat'), hotel.get('lon'),
+                     hotel.get('full_address') or None),
                 )
                 inserted += 1
             except Exception as e:
@@ -1145,12 +1492,13 @@ class ItenaryRecommendationSystem:
                 cost = self._to_decimal(r.get('approx_cost'))
                 cursor.execute(
                     """INSERT INTO restaurants
-                       (name, locality, city, cuisine, rating, cost)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                       (name, locality, city, cuisine, rating, cost, lat, lon, full_address)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (name, str(r.get('location', '')).strip() or None, city,
                      str(r.get('cuisine', '')).strip() or None,
                      self._to_decimal(r.get('rating')),
-                     int(cost) if cost is not None else None),
+                     int(cost) if cost is not None else None,
+                     r.get('lat'), r.get('lon'), r.get('full_address') or None),
                 )
                 inserted += 1
             except Exception as e:

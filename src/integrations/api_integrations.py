@@ -131,6 +131,49 @@ def _db_image_set(query: str, url: str):
 
 
 # ---------------------------------------------------------------------------
+# OpenStreetMap Nominatim geocoder
+# ---------------------------------------------------------------------------
+
+class NominatimClient:
+    """Free geocoding via OpenStreetMap Nominatim. Stateless — callers cache
+    results by writing lat/lon/full_address back onto their own DB rows
+    (places/hotels/restaurants). Nominatim's usage policy asks for max ~1 req/sec
+    and a valid User-Agent."""
+
+    SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+
+    def __init__(self):
+        self.user_agent = os.getenv("NOMINATIM_USER_AGENT", "travelens-backend/1.0")
+
+    def geocode(self, query: str):
+        """Resolve a query to {'lat', 'lon', 'full_address'}. Returns None when
+        nothing is found or the request fails."""
+        query = (query or "").strip()
+        if not query:
+            return None
+
+        try:
+            resp = requests.get(
+                self.SEARCH_URL,
+                params={"q": query, "format": "jsonv2", "limit": 1},
+                headers={"User-Agent": self.user_agent},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            results = resp.json()
+            if results:
+                top = results[0]
+                return {
+                    "lat": float(top["lat"]),
+                    "lon": float(top["lon"]),
+                    "full_address": top.get("display_name", ""),
+                }
+        except Exception as e:
+            print(f"[NominatimClient] geocode error for {query!r}: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Quota
 # ---------------------------------------------------------------------------
 
