@@ -3,6 +3,7 @@ import json
 import mysql.connector
 
 from core.db import get_connection
+from core.images import with_image_urls
 
 
 def add_favorite(user_id, itinerary_id):
@@ -43,7 +44,8 @@ def get_favorites(user_id):
         )
         favorites = cursor.fetchall()
         for fav in favorites:
-            fav["itinerary"] = json.loads(fav["response_json"]) if fav["response_json"] else None
+            itinerary = json.loads(fav["response_json"]) if fav["response_json"] else None
+            fav["itinerary"] = with_image_urls(itinerary) if itinerary else None
             del fav["response_json"]
             if fav.get("created_at"):
                 fav["created_at"] = fav["created_at"].isoformat()
@@ -111,7 +113,8 @@ def get_history(user_id):
         )
         history = cursor.fetchall()
         for item in history:
-            item["itinerary"] = json.loads(item["response_json"]) if item["response_json"] else None
+            itinerary = json.loads(item["response_json"]) if item["response_json"] else None
+            item["itinerary"] = with_image_urls(itinerary) if itinerary else None
             del item["response_json"]
             if item.get("created_at"):
                 item["created_at"] = item["created_at"].isoformat()

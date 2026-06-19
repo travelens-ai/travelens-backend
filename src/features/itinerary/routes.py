@@ -3,6 +3,7 @@ import json
 from flask import Blueprint, request, jsonify
 
 import features.itinerary.service as itinerary_service
+from core.images import with_image_urls
 
 itinerary_bp = Blueprint("itinerary", __name__)
 
@@ -33,7 +34,7 @@ def generate_itinerary():
 
         cached_result, cached_id = itinerary_service.get_cached_itinerary(cache_key)
         if cached_result is not None:
-            response = cached_result.copy() if isinstance(cached_result, dict) else cached_result
+            response = with_image_urls(cached_result) if isinstance(cached_result, dict) else cached_result
             if isinstance(response, dict):
                 response["itinerary_id"] = cached_id
             return jsonify(response), 200
@@ -41,10 +42,11 @@ def generate_itinerary():
         result = itinerary_service.recommender.generate_itinerary(user_preferences)
         itinerary_id = itinerary_service.store_itinerary(cache_key, user_preferences, result)
 
-        if isinstance(result, dict):
-            result["itinerary_id"] = itinerary_id
+        response = with_image_urls(result) if isinstance(result, dict) else result
+        if isinstance(response, dict):
+            response["itinerary_id"] = itinerary_id
 
-        return jsonify(result), 200
+        return jsonify(response), 200
     except Exception as e:
         print(f"Error generating itinerary: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
