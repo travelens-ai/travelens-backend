@@ -10,17 +10,20 @@ places_bp = Blueprint("places", __name__)
 
 @places_bp.route("/places", methods=["GET"])
 def get_places():
-    """Get places by type: popular, nearby, trending or weekend
+    """Get places by keyword prefix, or by type: popular, nearby, trending or weekend
     ---
     tags:
       - Places
     parameters:
       - in: query
+        name: keyword
+        type: string
+        description: Search places whose name starts with this keyword (min 3 characters)
+      - in: query
         name: type
         type: string
-        required: true
         enum: [popular, nearby, trending, weekend]
-        description: Type of places to fetch
+        description: Type of places to fetch (used when keyword is not provided)
       - in: query
         name: lat
         type: number
@@ -31,14 +34,26 @@ def get_places():
         description: User longitude (required for nearby and weekend)
     responses:
       200:
-        description: Returns 10 places of the requested type
+        description: Returns matching places
       400:
-        description: Invalid type or missing params
+        description: Invalid type, keyword too short, or missing params
       503:
         description: Service still loading
     """
     if not is_initialized():
         return loading_response()
+
+    keyword = request.args.get("keyword")
+    if keyword is not None:
+        keyword = keyword.strip()
+        if len(keyword) < 3:
+            return jsonify({"status": "error", "message": "keyword must be at least 3 characters"}), 400
+        try:
+            result = places_service.query_by_keyword(keyword)
+            return jsonify({"status": "success", "places": result}), 200
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     place_type = request.args.get("type")
     if not place_type or place_type not in ("popular", "nearby", "trending", "weekend"):

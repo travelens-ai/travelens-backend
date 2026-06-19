@@ -67,6 +67,48 @@ def query_popular():
     return recommender.get_popular_destination() or []
 
 
+def query_by_keyword(keyword, limit=10):
+    """Return city, state and place names that contain `keyword`
+    (case-insensitive). Exact matches sort first; ties are broken by source
+    priority (city > state > place) then alphabetically. LIKE wildcards in the
+    keyword are escaped so user input is matched literally."""
+    term = keyword.strip().lower()
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = "%" + escaped + "%"
+
+    # (table, type label, source-priority rank for tie-breaking)
+    sources = [("cities", "city", 0), ("states", "state", 1), ("places", "place", 2)]
+
+    conn = new_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        results = []
+        for table, type_label, rank in sources:
+            cursor.execute(
+                f"SELECT name FROM {table} WHERE name LIKE %s",
+                (like,),
+            )
+            for row in cursor.fetchall():
+                name = row["name"]
+                results.append({
+                    "name": name,
+                    "type": type_label,
+                    "_exact": str(name).strip().lower() == term,
+                    "_rank": rank,
+                })
+
+        # Exact matches first, then source priority, then alphabetical.
+        results.sort(key=lambda r: (not r["_exact"], r["_rank"], str(r["name"]).lower()))
+
+        out = []
+        for r in results[:limit]:
+            out.append({"name": r["name"], "type": r["type"]})
+        return out
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def query_trending():
     conn = new_connection()
     cursor = conn.cursor(dictionary=True)
