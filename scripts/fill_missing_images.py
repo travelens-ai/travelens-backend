@@ -1,8 +1,14 @@
 """
-Fill missing images for places that have no image in DB.
+Fill missing images for places that have no entry in place_image_map.
 
-Fetches from Pexels (primary) → Unsplash (fallback), downloads as .webp,
-saves to generated_images/, updates places.image in DB.
+For each such place, fetches up to 5 images from:
+  Wikimedia Commons (primary) → Pexels → Unsplash (fallbacks)
+
+Each image is:
+  1. Downloaded and converted to .webp
+  2. Uploaded to CDN via https://travelens.in/app/upload.php
+  3. Inserted into `images` table (filename only)
+  4. Linked in `place_image_map`
 
 Run from project root:
     .venv/bin/python3 scripts/fill_missing_images.py          # all missing
@@ -10,6 +16,7 @@ Run from project root:
 """
 
 import os
+import re
 import sys
 import time
 import requests
@@ -24,6 +31,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PEXELS_URL = "https://api.pexels.com/v1/search"
 UNSPLASH_URL = "https://api.unsplash.com/search/photos"
+CDN_UPLOAD_URL = "https://travelens.in/app/upload.php"
 
 PEXELS_KEY = os.getenv("PEXELS_API_KEY", "")
 UNSPLASH_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
@@ -38,18 +46,15 @@ DB_CONFIG = {
     "connection_timeout": 30,
 }
 
-
 WIKIMEDIA_URL = "https://commons.wikimedia.org/w/api.php"
 _SKIP_WORDS = {"map", "logo", "icon", "flag", "svg", "diagram", "coat", "plan", "stamp", "chart"}
-
-
 _WIKIMEDIA_HEADERS = {
     "User-Agent": "TravelensImageBot/1.0 (travelens-backend; image-fill script)"
 }
 
 
-def fetch_wikimedia_urls(query: str) -> list:
-    """Return all valid landscape JPG candidates from Wikimedia Commons."""
+def fetch_wikimedia_urls(query: str, count: int) -> list:
+    """Return up to `count` valid landscape JPG candidates from Wikimedia Commons."""
     try:
         resp = requests.get(
             WIKIMEDIA_URL,
@@ -59,7 +64,7 @@ def fetch_wikimedia_urls(query: str) -> list:
                 "generator": "search",
                 "gsrsearch": query,
                 "gsrnamespace": 6,
-                "gsrlimit": 15,
+                "gsrlimit": count * 3,
                 "prop": "imageinfo",
                 "iiprop": "url|size|mime",
                 "format": "json",
@@ -71,6 +76,8 @@ def fetch_wikimedia_urls(query: str) -> list:
         candidates = sorted(pages.values(), key=lambda x: x.get("index", 99))
         urls = []
         for page in candidates:
+            if len(urls) >= count:
+                break
             ii = page.get("imageinfo", [{}])[0]
             mime = ii.get("mime", "")
             url = ii.get("url", "")
@@ -90,48 +97,47 @@ def fetch_wikimedia_urls(query: str) -> list:
     return []
 
 
-def fetch_image_url(query: str) -> str:
-    """Try Wikimedia first (exact landmark), fall back to Pexels then Unsplash."""
-    # Try each Wikimedia candidate until one downloads successfully
-    for url in fetch_wikimedia_urls(query):
-        try:
-            r = requests.head(url, headers=_WIKIMEDIA_HEADERS, timeout=5)
-            if r.status_code == 200:
-                return url
-        except Exception:
-            continue
+def fetch_image_urls(query: str, count: int = 5) -> list:
+    """Collect up to `count` image URLs from Wikimedia → Pexels → Unsplash."""
+    urls = []
 
-    if PEXELS_KEY:
+    urls.extend(fetch_wikimedia_urls(query, count))
+
+    if len(urls) < count and PEXELS_KEY:
+        needed = count - len(urls)
         try:
             resp = requests.get(
                 PEXELS_URL,
                 headers={"Authorization": PEXELS_KEY},
-                params={"query": query, "per_page": 1, "orientation": "landscape"},
+                params={"query": query, "per_page": needed, "orientation": "landscape"},
                 timeout=10,
             )
             resp.raise_for_status()
-            photos = resp.json().get("photos", [])
-            if photos:
-                return photos[0].get("src", {}).get("large", "")
+            for photo in resp.json().get("photos", []):
+                url = photo.get("src", {}).get("large", "")
+                if url and url not in urls:
+                    urls.append(url)
         except Exception as e:
             print(f"  [Pexels] error: {e}")
 
-    if UNSPLASH_KEY:
+    if len(urls) < count and UNSPLASH_KEY:
+        needed = count - len(urls)
         try:
             resp = requests.get(
                 UNSPLASH_URL,
                 headers={"Authorization": f"Client-ID {UNSPLASH_KEY}"},
-                params={"query": query, "per_page": 1, "orientation": "landscape"},
+                params={"query": query, "per_page": needed, "orientation": "landscape"},
                 timeout=10,
             )
             resp.raise_for_status()
-            results = resp.json().get("results", [])
-            if results:
-                return results[0].get("urls", {}).get("regular", "")
+            for result in resp.json().get("results", []):
+                url = result.get("urls", {}).get("regular", "")
+                if url and url not in urls:
+                    urls.append(url)
         except Exception as e:
             print(f"  [Unsplash] error: {e}")
 
-    return ""
+    return urls[:count]
 
 
 def download_as_webp(url: str, filename: str) -> bool:
@@ -150,15 +156,25 @@ def download_as_webp(url: str, filename: str) -> bool:
         return False
 
 
-def link_place_image(cursor, conn, place_id, filename):
-    """Upsert the filename into `images` and link it to the place via
-    `place_image_map`. Replaces the old `UPDATE places SET image`."""
-    # ON DUPLICATE ... LAST_INSERT_ID(id) makes lastrowid the existing row's id
-    # when the image_name already exists, so we always get a valid image_id.
+def upload_to_cdn(filepath: str) -> str:
+    """Upload file to CDN, return filename only (not full URL)."""
+    try:
+        with open(filepath, "rb") as f:
+            resp = requests.post(CDN_UPLOAD_URL, files={"file": f}, timeout=30)
+        if resp.status_code == 200:
+            path = resp.json().get("path", "")
+            return os.path.basename(path)
+    except Exception as e:
+        print(f"  [CDN upload] error: {e}")
+    return ""
+
+
+def link_place_image(cursor, conn, place_id: int, image_name: str):
+    """Insert image_name into `images`, link to place via `place_image_map`."""
     cursor.execute(
         """INSERT INTO images (image_name) VALUES (%s)
            ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)""",
-        (filename,),
+        (image_name,),
     )
     image_id = cursor.lastrowid
     cursor.execute(
@@ -174,18 +190,20 @@ def main(limit=None):
     write_cursor = conn.cursor()
 
     read_cursor.execute(
-        "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type "
+        "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type, "
+        "COUNT(pim.image_id) AS img_count "
         "FROM places p "
         "LEFT JOIN cities c ON p.city_id = c.id "
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
-        "WHERE pim.place_id IS NULL"
+        "GROUP BY p.id, p.name, c.name, s.name, p.type "
+        "HAVING img_count <= 1"
     )
     rows = read_cursor.fetchall()
     if limit:
         rows = rows[:limit]
     total = len(rows)
-    print(f"Processing {total} places with no image.\n")
+    print(f"Processing {total} places with 0 or 1 images.\n")
 
     done = 0
     failed = 0
@@ -195,44 +213,54 @@ def main(limit=None):
         city = (row["city"] or "").title()
         state = (row["state"] or "").title()
         place_type = (row["type"] or "").title()
+        img_count = row.get("img_count", 0)
+        needed = 5 - img_count
 
-        # Include type for relevance: "Gavi Ecotourism Pathanamthitta India"
         query = f"{name} {place_type} {city} India".strip()
-        parts = [p for p in [name, city, state] if p]
-        filename = "_".join(parts).replace(" ", "_") + ".webp"
-        filepath = os.path.join(OUTPUT_DIR, filename)
+        base_filename = re.sub(r"[^\w\-]", "_", "_".join(p for p in [name, city, state] if p).replace(" ", "_"))
 
-        print(f"[{i}/{total}] {name} ({city}) [{place_type}]", end=" ... ", flush=True)
+        print(f"[{i}/{total}] {name} ({city}) [{place_type}] (has {img_count}, fetching {needed} more)")
 
-        # skip if file already exists on disk
-        if os.path.exists(filepath):
-            link_place_image(write_cursor, conn, row["id"], filename)
-            print(f"already on disk, updated DB.")
-            done += 1
-            continue
-
-        url = fetch_image_url(query)
-        if not url:
-            print("no image found.")
+        urls = fetch_image_urls(query, count=needed)
+        if not urls:
+            print(f"  no images found.")
             failed += 1
             continue
 
-        if download_as_webp(url, filename):
-            link_place_image(write_cursor, conn, row["id"], filename)
+        uploaded = 0
+        for idx, url in enumerate(urls, img_count + 1):
+            filename = f"{base_filename}_{idx}.webp"
+            filepath = os.path.join(OUTPUT_DIR, filename)
+
+            if not os.path.exists(filepath):
+                if not download_as_webp(url, filename):
+                    print(f"  [{idx}/5] download failed.")
+                    continue
+
+            cdn_name = upload_to_cdn(filepath)
+            if not cdn_name:
+                print(f"  [{idx}/5] CDN upload failed.")
+                continue
+
+            link_place_image(write_cursor, conn, row["id"], cdn_name)
             size_kb = os.path.getsize(filepath) / 1024
-            print(f"saved ({size_kb:.0f} KB)  query: '{query}'")
+            print(f"  [{idx}/5] {cdn_name} ({size_kb:.0f} KB)")
+            uploaded += 1
+
+        if uploaded > 0:
+            print(f"  => {uploaded} image(s) linked.")
             done += 1
         else:
-            print("download failed.")
+            print(f"  => all uploads failed.")
             failed += 1
 
-        time.sleep(0.3)  # be polite to APIs
+        time.sleep(0.3)
 
     read_cursor.close()
     write_cursor.close()
     conn.close()
 
-    print(f"\nDone. {done} images saved, {failed} failed out of {total}.")
+    print(f"\nDone. {done} places processed, {failed} failed out of {total}.")
 
 
 if __name__ == "__main__":
@@ -244,4 +272,3 @@ if __name__ == "__main__":
         idx = sys.argv.index("--limit")
         limit = int(sys.argv[idx + 1])
     main(limit=limit)
-    
