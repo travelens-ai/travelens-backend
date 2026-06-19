@@ -97,7 +97,7 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
     return []
 
 
-def fetch_image_urls(query: str, count: int = 5) -> list:
+def fetch_image_urls(query: str, count: int = 3) -> list:
     """Collect up to `count` image URLs from Wikimedia → Pexels → Unsplash."""
     urls = []
 
@@ -144,6 +144,7 @@ def download_as_webp(url: str, filename: str) -> bool:
     """Download image from URL, convert to webp, save to generated_images/."""
     try:
         from PIL import Image
+        time.sleep(1.5)  # respect Wikimedia rate limits
         resp = requests.get(url, headers=_WIKIMEDIA_HEADERS, timeout=15)
         resp.raise_for_status()
         img = Image.open(BytesIO(resp.content)).convert("RGB")
@@ -197,7 +198,7 @@ def main(limit=None):
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
         "GROUP BY p.id, p.name, c.name, s.name, p.type "
-        "HAVING img_count <= 1"
+        "HAVING img_count < 3"
     )
     rows = read_cursor.fetchall()
     if limit:
@@ -214,7 +215,7 @@ def main(limit=None):
         state = (row["state"] or "").title()
         place_type = (row["type"] or "").title()
         img_count = row.get("img_count", 0)
-        needed = 5 - img_count
+        needed = 3 - img_count
 
         query = f"{name} {place_type} {city} India".strip()
         base_filename = re.sub(r"[^\w\-]", "_", "_".join(p for p in [name, city, state] if p).replace(" ", "_"))
@@ -254,7 +255,7 @@ def main(limit=None):
             print(f"  => all uploads failed.")
             failed += 1
 
-        time.sleep(0.3)
+        time.sleep(1.0)
 
     read_cursor.close()
     write_cursor.close()
