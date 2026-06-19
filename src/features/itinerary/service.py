@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 import threading
@@ -71,6 +72,23 @@ def get_cached_itinerary(cache_key):
     return None, None
 
 
+def _prune_result_for_storage(result):
+    """Return a deep copy of the itinerary result with the bulky/derived parts
+    stripped out before persisting: `data.places` and
+    `data.detailed_itinerary.similar_places`. The caller's `result` (and the
+    in-memory cache) keep the full payload — only the stored copy is trimmed."""
+    if not isinstance(result, dict):
+        return result
+    pruned = copy.deepcopy(result)
+    data = pruned.get("data")
+    if isinstance(data, dict):
+        data.pop("places", None)
+        detailed = data.get("detailed_itinerary")
+        if isinstance(detailed, dict):
+            detailed.pop("similar_places", None)
+    return pruned
+
+
 def store_itinerary(cache_key, user_preferences, result):
     itinerary_id = None
     if is_db_ready():
@@ -79,7 +97,7 @@ def store_itinerary(cache_key, user_preferences, result):
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO itineraries (request_json, response_json, status) VALUES (%s, %s, %s)",
-                (json.dumps(user_preferences), json.dumps(result), "success"),
+                (json.dumps(user_preferences), json.dumps(_prune_result_for_storage(result)), "success"),
             )
             conn.commit()
             itinerary_id = cursor.lastrowid
