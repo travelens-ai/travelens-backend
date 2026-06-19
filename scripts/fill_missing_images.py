@@ -150,6 +150,24 @@ def download_as_webp(url: str, filename: str) -> bool:
         return False
 
 
+def link_place_image(cursor, conn, place_id, filename):
+    """Upsert the filename into `images` and link it to the place via
+    `place_image_map`. Replaces the old `UPDATE places SET image`."""
+    # ON DUPLICATE ... LAST_INSERT_ID(id) makes lastrowid the existing row's id
+    # when the image_name already exists, so we always get a valid image_id.
+    cursor.execute(
+        """INSERT INTO images (image_name) VALUES (%s)
+           ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)""",
+        (filename,),
+    )
+    image_id = cursor.lastrowid
+    cursor.execute(
+        "INSERT IGNORE INTO place_image_map (place_id, image_id) VALUES (%s, %s)",
+        (place_id, image_id),
+    )
+    conn.commit()
+
+
 def main(limit=None):
     conn = mysql.connector.connect(**DB_CONFIG)
     read_cursor = conn.cursor(dictionary=True)
@@ -160,7 +178,8 @@ def main(limit=None):
         "FROM places p "
         "LEFT JOIN cities c ON p.city_id = c.id "
         "LEFT JOIN states s ON c.state_id = s.id "
-        "WHERE p.image IS NULL OR p.image = ''"
+        "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
+        "WHERE pim.place_id IS NULL"
     )
     rows = read_cursor.fetchall()
     if limit:
@@ -187,10 +206,7 @@ def main(limit=None):
 
         # skip if file already exists on disk
         if os.path.exists(filepath):
-            write_cursor.execute(
-                "UPDATE places SET image = %s WHERE id = %s", (filename, row["id"])
-            )
-            conn.commit()
+            link_place_image(write_cursor, conn, row["id"], filename)
             print(f"already on disk, updated DB.")
             done += 1
             continue
@@ -202,10 +218,7 @@ def main(limit=None):
             continue
 
         if download_as_webp(url, filename):
-            write_cursor.execute(
-                "UPDATE places SET image = %s WHERE id = %s", (filename, row["id"])
-            )
-            conn.commit()
+            link_place_image(write_cursor, conn, row["id"], filename)
             size_kb = os.path.getsize(filepath) / 1024
             print(f"saved ({size_kb:.0f} KB)  query: '{query}'")
             done += 1

@@ -14,6 +14,7 @@ import time
 import threading
 from integrations.generate_images import ImageGenerator
 from integrations.api_integrations import GooglePlacesClient, ImageSearchClient
+from core.db import fetch_dicts
 import os
 import random
 
@@ -160,13 +161,100 @@ class ItenaryRecommendationSystem:
             print(f"Error configuring Azure OpenAI: {str(e)}")
             raise
 
+    @staticmethod
+    def _coerce_numeric(df, columns):
+        """Convert DB NULLs (None) to NaN so float()/mean() behave like the CSV
+        path. Without this, float(None) raises TypeError downstream."""
+        for col in columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df
+
+    def _load_places_df(self):
+        """Load places from the DB, reconstructing CSV-equivalent columns
+        (city/state via joins). Falls back to the CSV if the DB is unavailable
+        or returns no rows."""
+        try:
+            rows = fetch_dicts(
+                """
+                SELECT p.name AS name, p.type AS type,
+                       c.name AS city, st.name AS state,
+                       p.rating AS rating, p.num_ratings AS `no of rating`,
+                       p.best_month AS `best month to visit`,
+                       p.famous_activities AS `famous activities`,
+                       p.famous_activities_rating AS `famous activities with rating`,
+                       (SELECT i.image_name FROM place_image_map pim
+                          JOIN images i ON pim.image_id = i.id
+                         WHERE pim.place_id = p.id LIMIT 1) AS image,
+                       p.dist_airport AS `distance from airport`,
+                       p.dist_bus_stand AS `distance from bus stand`,
+                       p.dist_railway AS `distance from railway station`,
+                       p.prefer_friends AS `prefer for friends`,
+                       p.prefer_couple AS `prefer for couple`,
+                       p.prefer_family_children AS `prefer for family with children`,
+                       p.prefer_family_no_children AS `prefer for family without children`
+                FROM places p
+                LEFT JOIN cities c ON p.city_id = c.id
+                LEFT JOIN states st ON c.state_id = st.id
+                """
+            )
+            if rows:
+                df = pd.DataFrame(rows)
+                df = self._coerce_numeric(df, ['rating', 'no of rating'])
+                print(f"  Loaded {len(df)} places from DB.")
+                return df
+            print("  places table empty — falling back to CSV.")
+        except Exception as e:
+            print(f"  DB read for places failed ({e}) — falling back to CSV.")
+        return pd.read_csv('indian_travel_places.csv')
+
+    def _load_hotels_df(self):
+        """Load hotels from the DB (columns already match the CSV). Falls back
+        to the CSV if the DB is unavailable or returns no rows."""
+        try:
+            rows = fetch_dicts(
+                """SELECT address, area, city, state, country, hotel_star_rating,
+                          pageurl, property_name, property_type, site_review_rating
+                   FROM hotels"""
+            )
+            if rows:
+                df = pd.DataFrame(rows)
+                df = self._coerce_numeric(df, ['hotel_star_rating', 'site_review_rating'])
+                print(f"  Loaded {len(df)} hotels from DB.")
+                return df
+            print("  hotels table empty — falling back to CSV.")
+        except Exception as e:
+            print(f"  DB read for hotels failed ({e}) — falling back to CSV.")
+        return pd.read_csv('indian_hotels.csv')
+
+    def _load_restaurants_df(self):
+        """Load restaurants from the DB, aliasing snake_case back to the
+        CSV-style capitalized column names the recommender expects. Falls back
+        to the CSV if the DB is unavailable or returns no rows."""
+        try:
+            rows = fetch_dicts(
+                """SELECT name AS Name, location AS Location, locality AS Locality,
+                          city AS City, cuisine AS Cuisine, rating AS Rating,
+                          votes AS Votes, cost AS Cost
+                   FROM restaurants"""
+            )
+            if rows:
+                df = pd.DataFrame(rows)
+                df = self._coerce_numeric(df, ['Rating', 'Votes', 'Cost'])
+                print(f"  Loaded {len(df)} restaurants from DB.")
+                return df
+            print("  restaurants table empty — falling back to CSV.")
+        except Exception as e:
+            print(f"  DB read for restaurants failed ({e}) — falling back to CSV.")
+        return pd.read_csv('indian_restaurants.csv')
+
     def _load_data(self):
         """Load required datasets"""
         try:
             print("Loading data...")
-            self.places_df = pd.read_csv('indian_travel_places.csv')
-            self.hotels_df = pd.read_csv('indian_hotels.csv')
-            self.restaurants_df = pd.read_csv('indian_restaurants.csv')
+            self.places_df = self._load_places_df()
+            self.hotels_df = self._load_hotels_df()
+            self.restaurants_df = self._load_restaurants_df()
 
             print("Data loaded successfully.")
             # Preprocess the places data

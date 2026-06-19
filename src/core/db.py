@@ -40,6 +40,21 @@ def new_connection():
     return conn
 
 
+def fetch_dicts(query, params=None):
+    """Run a read-only query on a fresh dedicated connection and return rows as
+    a list of dicts. Used for bulk data loads (e.g. recommender startup) so they
+    don't contend with the shared connection across threads."""
+    conn = new_connection()
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(query, params or ())
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+    finally:
+        conn.close()
+
+
 def is_db_ready():
     return _db_initialized
 
