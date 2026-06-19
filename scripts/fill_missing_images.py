@@ -16,6 +16,7 @@ Run from project root:
 """
 
 import os
+import re
 import sys
 import time
 import requests
@@ -189,18 +190,20 @@ def main(limit=None):
     write_cursor = conn.cursor()
 
     read_cursor.execute(
-        "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type "
+        "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type, "
+        "COUNT(pim.image_id) AS img_count "
         "FROM places p "
         "LEFT JOIN cities c ON p.city_id = c.id "
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
-        "WHERE pim.place_id IS NULL"
+        "GROUP BY p.id, p.name, c.name, s.name, p.type "
+        "HAVING img_count <= 1"
     )
     rows = read_cursor.fetchall()
     if limit:
         rows = rows[:limit]
     total = len(rows)
-    print(f"Processing {total} places with no images.\n")
+    print(f"Processing {total} places with 0 or 1 images.\n")
 
     done = 0
     failed = 0
@@ -210,20 +213,22 @@ def main(limit=None):
         city = (row["city"] or "").title()
         state = (row["state"] or "").title()
         place_type = (row["type"] or "").title()
+        img_count = row.get("img_count", 0)
+        needed = 5 - img_count
 
         query = f"{name} {place_type} {city} India".strip()
-        base_filename = "_".join(p for p in [name, city, state] if p).replace(" ", "_")
+        base_filename = re.sub(r"[^\w\-]", "_", "_".join(p for p in [name, city, state] if p).replace(" ", "_"))
 
-        print(f"[{i}/{total}] {name} ({city}) [{place_type}]")
+        print(f"[{i}/{total}] {name} ({city}) [{place_type}] (has {img_count}, fetching {needed} more)")
 
-        urls = fetch_image_urls(query, count=5)
+        urls = fetch_image_urls(query, count=needed)
         if not urls:
             print(f"  no images found.")
             failed += 1
             continue
 
         uploaded = 0
-        for idx, url in enumerate(urls, 1):
+        for idx, url in enumerate(urls, img_count + 1):
             filename = f"{base_filename}_{idx}.webp"
             filepath = os.path.join(OUTPUT_DIR, filename)
 
