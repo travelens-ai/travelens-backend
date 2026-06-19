@@ -574,7 +574,7 @@ class ItenaryRecommendationSystem:
             # Otherwise fall back to matching by state
             top_places = top_places[
                 top_places['state'].str.lower().apply(
-                    lambda state: any(part in state.lower() for part in location_parts) )
+                    lambda state: any(part in str(state).lower() for part in location_parts) )
             ]
 
         # Calculate average rating for all restaurants (or set a constant)
