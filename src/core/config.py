@@ -12,7 +12,24 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 # Azure OpenAI
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
-AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+
+
+def _normalize_azure_endpoint(raw):
+    """The AzureOpenAI client expects the bare resource URL; it appends
+    `/openai/deployments/...` itself. A trailing `/openai` or `/openai/v1`
+    (the v1-API form) produces a doubled, malformed path -> 404. Strip it so
+    either form in .env works."""
+    if not raw:
+        return raw
+    endpoint = raw.rstrip("/")
+    for suffix in ("/openai/v1", "/openai"):
+        if endpoint.endswith(suffix):
+            endpoint = endpoint[: -len(suffix)]
+            break
+    return endpoint
+
+
+AZURE_OPENAI_ENDPOINT = _normalize_azure_endpoint(os.getenv("AZURE_OPENAI_ENDPOINT"))
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
