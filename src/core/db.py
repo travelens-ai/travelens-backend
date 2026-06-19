@@ -55,6 +55,21 @@ def fetch_dicts(query, params=None):
         conn.close()
 
 
+def execute_write(query, params=None):
+    """Run a single write (INSERT/UPDATE) on a fresh dedicated connection and
+    return cursor.lastrowid. Autocommit is on (new_connection), so it's safe to
+    call from background threads without touching the shared connection."""
+    conn = new_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, params or ())
+        last_id = cursor.lastrowid
+        cursor.close()
+        return last_id
+    finally:
+        conn.close()
+
+
 def is_db_ready():
     return _db_initialized
 
@@ -176,6 +191,7 @@ def init_db():
                 prefer_family_no_children BOOLEAN DEFAULT FALSE,
                 famous_activities_rating TEXT,
                 image VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_city_id (city_id),
                 INDEX idx_type (type),
                 INDEX idx_rating (rating),

@@ -14,7 +14,7 @@ import time
 import threading
 from integrations.generate_images import ImageGenerator
 from integrations.api_integrations import GooglePlacesClient, ImageSearchClient
-from core.db import fetch_dicts
+from core.db import fetch_dicts, new_connection
 import os
 import random
 
@@ -208,6 +208,34 @@ class ItenaryRecommendationSystem:
             print(f"  DB read for places failed ({e}) — falling back to CSV.")
         return pd.read_csv('indian_travel_places.csv')
 
+    def _get_images_for_places(self, names):
+        """Return {lowercased place name -> [image_name, ...]} for the given place
+        names, pulling ALL images per place from place_image_map. Used to build the
+        multi-image galleries in the itinerary response. Returns {} on any DB error."""
+        names = [str(n).strip().lower() for n in names if str(n).strip()]
+        if not names:
+            return {}
+        try:
+            placeholders = ",".join(["%s"] * len(names))
+            rows = fetch_dicts(
+                f"""SELECT LOWER(p.name) AS name, i.image_name AS image
+                    FROM places p
+                    JOIN place_image_map pim ON pim.place_id = p.id
+                    JOIN images i ON pim.image_id = i.id
+                    WHERE LOWER(p.name) IN ({placeholders})""",
+                tuple(names),
+            )
+        except Exception as e:
+            print(f"  _get_images_for_places failed ({e})")
+            return {}
+
+        result = {}
+        for row in rows:
+            result.setdefault(row["name"], [])
+            if row["image"] and row["image"] not in result[row["name"]]:
+                result[row["name"]].append(row["image"])
+        return result
+
     def _load_hotels_df(self):
         """Load hotels from the DB (columns already match the CSV). Falls back
         to the CSV if the DB is unavailable or returns no rows."""
@@ -367,12 +395,19 @@ class ItenaryRecommendationSystem:
 
     def compute_trip_type_score(self, place_type, user_trip_type_embedding):
         """Compute trip type score using BERT embeddings"""
+        # Newly-added places can have a missing/blank type (NaN/None) — skip
+        # embedding those (a blank string would error the embeddings API) and
+        # treat them as a neutral 0 score.
+        if place_type is None or (isinstance(place_type, float) and pd.isna(place_type)) \
+                or not str(place_type).strip():
+            return 0.0
+
         place_type_embedding = self.place_type_embeddings.get(place_type)
         if place_type_embedding is None:
             place_type_embedding = self._encode([place_type])[0]
             place_type_embedding = place_type_embedding / norm(place_type_embedding)
             self.place_type_embeddings[place_type] = place_type_embedding
-            
+
         similarity = dot(place_type_embedding, user_trip_type_embedding)
         return similarity
 
@@ -496,11 +531,44 @@ class ItenaryRecommendationSystem:
             if placename not in place_image_map:
                 place_image_map[placename] = 'default' + str(random.randint(1, 7)) + '.webp'
 
-            # Check if the placename exists in the mp dictionary
+            # Resolve the main destination's single image — used only as a
+            # fallback for the parent-level images gallery below (it is no longer
+            # returned as itinerary['image']).
+            main_single_image = None
             if placename in place_image_map and pd.notna(place_image_map[placename]):
-                itinerary['image'] = place_image_map[placename]
+                main_single_image = place_image_map[placename]
+
+            # Attach a single image to every place in each day's places_to_visit.
+            # Match the LLM-generated place name (title case) against our image
+            # map (DB placenames are lowercase) case-insensitively; fall back to
+            # a default image so the field is always populated.
+            normalized_image_map = {
+                str(name).strip().lower(): img
+                for name, img in place_image_map.items()
+            }
+            for day in itinerary.get('itinerary', []):
+                for place in day.get('places_to_visit', []):
+                    key = str(place.get('name', '')).strip().lower()
+                    image = normalized_image_map.get(key)
+                    if not image or pd.isna(image):
+                        image = 'default' + str(random.randint(1, 7)) + '.webp'
+                    place['image'] = image
+
+            # Parent level: all images for the main destination. The destination
+            # is usually a city (not a row in `places`), so fall back to the
+            # single main image resolved above when it has none of its own.
+            main_images = self._get_images_for_places([placename]).get(
+                str(placename).strip().lower(), []
+            )
+            if not main_images and main_single_image:
+                main_images = [main_single_image]
+            itinerary['images'] = main_images
 
             threading.Thread(target=self.save_similar_places, args=(itinerary['similar_places'],), daemon=True).start()
+
+            # Persist any place the LLM returned that isn't yet in our places
+            # table (off the request thread so the response isn't delayed).
+            threading.Thread(target=self.save_new_places, args=(itinerary,), daemon=True).start()
 
             # Update similar_places with images from similar_places.pkl
             try:
@@ -883,6 +951,176 @@ class ItenaryRecommendationSystem:
         except Exception as e:
             print(f"Error saving similar places to CSV: {str(e)}")
 
+
+    def save_new_places(self, itinerary):
+        """Persist new entities from the itinerary into their respective tables:
+        places_to_visit -> places, hotels -> hotels, restaurants -> restaurants.
+        Only inserts entities not already present (by name, case-insensitive).
+        Runs in a background thread, so it uses its own dedicated DB connection."""
+        try:
+            conn = new_connection()  # autocommit, dedicated to this thread
+            cursor = conn.cursor()
+        except Exception as e:
+            print(f"[save_new_places] DB connection failed: {e}")
+            return
+
+        try:
+            self._save_new_places_to_db(cursor, itinerary)
+            self._save_new_hotels_to_db(cursor, itinerary)
+            self._save_new_restaurants_to_db(cursor, itinerary)
+        except Exception as e:
+            print(f"[save_new_places] error: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+
+    @staticmethod
+    def _parse_city_state(location):
+        """Parse an LLM "City, State" location string -> (city_lower, state)."""
+        city = state = None
+        if location:
+            parts = [p.strip() for p in str(location).split(',')]
+            if parts and parts[0]:
+                city = parts[0].lower()
+            if len(parts) > 1 and parts[1]:
+                state = parts[1].strip()
+        return city, state
+
+    @staticmethod
+    def _to_decimal(value):
+        """Extract the first number from an LLM value like '4.5' or '₹400–₹600'."""
+        if value is None:
+            return None
+        m = re.search(r'\d+(?:\.\d+)?', str(value).replace(',', ''))
+        return float(m.group()) if m else None
+
+    def _save_new_places_to_db(self, cursor, itinerary):
+        """places_to_visit -> places (resolving/creating the city)."""
+        candidates = []
+        for day in itinerary.get('itinerary', []):
+            for place in day.get('places_to_visit', []):
+                name = str(place.get('name', '')).strip()
+                if name:
+                    candidates.append((name, place.get('location', ''), place.get('activities')))
+        if not candidates:
+            return
+
+        cursor.execute("SELECT LOWER(name) FROM places")
+        existing = {row[0] for row in cursor.fetchall()}
+        inserted, seen = 0, set()
+        for name, location, activities in candidates:
+            key = name.lower()
+            if key in existing or key in seen:
+                continue
+            seen.add(key)
+            try:
+                city, state = self._parse_city_state(location)
+                city_id = self._resolve_city_id(cursor, city, state)
+                famous = ", ".join(activities) if isinstance(activities, list) and activities else None
+                cursor.execute(
+                    "INSERT INTO places (name, city_id, famous_activities) VALUES (%s, %s, %s)",
+                    (key, city_id, famous),
+                )
+                inserted += 1
+            except Exception as e:
+                print(f"[save_new_places] failed to insert place '{name}': {e}")
+        print(f"[save_new_places] inserted {inserted} new place(s).")
+
+    def _save_new_hotels_to_db(self, cursor, itinerary):
+        """hotels -> hotels table (matched on property_name)."""
+        candidates = []
+        for day in itinerary.get('itinerary', []):
+            for hotel in day.get('hotels', []):
+                name = str(hotel.get('name', '')).strip()
+                if name:
+                    candidates.append(hotel)
+        if not candidates:
+            return
+
+        cursor.execute("SELECT LOWER(property_name) FROM hotels WHERE property_name IS NOT NULL")
+        existing = {row[0] for row in cursor.fetchall()}
+        inserted, seen = 0, set()
+        for hotel in candidates:
+            name = str(hotel.get('name', '')).strip()
+            key = name.lower()
+            if key in existing or key in seen:
+                continue
+            seen.add(key)
+            try:
+                city, state = self._parse_city_state(hotel.get('location', ''))
+                cursor.execute(
+                    """INSERT INTO hotels
+                       (property_name, property_type, city, state, site_review_rating, pageurl)
+                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (name, str(hotel.get('type', '')).strip() or None,
+                     city, state, self._to_decimal(hotel.get('rating')),
+                     str(hotel.get('link', '')).strip() or None),
+                )
+                inserted += 1
+            except Exception as e:
+                print(f"[save_new_places] failed to insert hotel '{name}': {e}")
+        print(f"[save_new_places] inserted {inserted} new hotel(s).")
+
+    def _save_new_restaurants_to_db(self, cursor, itinerary):
+        """restaurants -> restaurants table (matched on name)."""
+        candidates = []
+        for day in itinerary.get('itinerary', []):
+            for r in day.get('restaurants', []):
+                name = str(r.get('name', '')).strip()
+                if name:
+                    candidates.append(r)
+        if not candidates:
+            return
+
+        cursor.execute("SELECT LOWER(name) FROM restaurants WHERE name IS NOT NULL")
+        existing = {row[0] for row in cursor.fetchall()}
+        inserted, seen = 0, set()
+        for r in candidates:
+            name = str(r.get('name', '')).strip()
+            key = name.lower()
+            if key in existing or key in seen:
+                continue
+            seen.add(key)
+            try:
+                city, _ = self._parse_city_state(r.get('location', ''))
+                cost = self._to_decimal(r.get('approx_cost'))
+                cursor.execute(
+                    """INSERT INTO restaurants
+                       (name, locality, city, cuisine, rating, cost)
+                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (name, str(r.get('location', '')).strip() or None, city,
+                     str(r.get('cuisine', '')).strip() or None,
+                     self._to_decimal(r.get('rating')),
+                     int(cost) if cost is not None else None),
+                )
+                inserted += 1
+            except Exception as e:
+                print(f"[save_new_places] failed to insert restaurant '{name}': {e}")
+        print(f"[save_new_places] inserted {inserted} new restaurant(s).")
+
+    def _resolve_city_id(self, cursor, city, state):
+        """Return cities.id for `city` (lowercased name), creating the row if it
+        doesn't exist. Returns None when no city name is available."""
+        if not city:
+            return None
+        cursor.execute("SELECT id FROM cities WHERE name = %s", (city,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+
+        # Create the city; link a state if we can match one.
+        state_id = None
+        if state:
+            cursor.execute(
+                "SELECT id FROM states WHERE LOWER(name) = %s", (state.lower(),)
+            )
+            srow = cursor.fetchone()
+            if srow:
+                state_id = srow[0]
+        cursor.execute(
+            "INSERT INTO cities (name, state_id) VALUES (%s, %s)", (city, state_id)
+        )
+        return cursor.lastrowid
 
 
     def _calculate_similarity_scores(self, text1, text2):
