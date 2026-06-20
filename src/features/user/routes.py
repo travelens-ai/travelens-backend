@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from core.db import is_db_ready
+from core.ads import get_inline_ads_config
 import features.user.service as service
 
 user_bp = Blueprint("user", __name__)
@@ -78,7 +79,11 @@ def get_favorites():
 
     favorites, (status, message, code) = service.get_favorites(user_id)
     if favorites is not None:
-        return jsonify({"status": status, "favorites": favorites}), code
+        return jsonify({
+            "status": status,
+            "favorites": favorites,
+            "ads": get_inline_ads_config("favorites"),
+        }), code
     return jsonify({"status": status, "message": message}), code
 
 
@@ -189,5 +194,9 @@ def get_history():
 
     history, (status, message, code) = service.get_history(user_id)
     if history is not None:
-        return jsonify({"status": status, "history": history}), code
+        return jsonify({
+            "status": status,
+            "history": history,
+            "ads": get_inline_ads_config("history"),
+        }), code
     return jsonify({"status": status, "message": message}), code

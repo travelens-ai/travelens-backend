@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify, Response, stream_with_context
 
 import features.itinerary.service as itinerary_service
 from core.images import with_image_urls
+from core.ads import section_ad, get_inline_ads_config
 
 itinerary_bp = Blueprint("itinerary", __name__)
 
@@ -38,6 +39,7 @@ def generate_itinerary():
             response = with_image_urls(cached_result) if isinstance(cached_result, dict) else cached_result
             if isinstance(response, dict):
                 response["itinerary_id"] = cached_id
+                _inject_itinerary_ads(response)
             return jsonify(response), 200
 
         result = itinerary_service.recommender.generate_itinerary(user_preferences)
@@ -46,11 +48,39 @@ def generate_itinerary():
         response = with_image_urls(result) if isinstance(result, dict) else result
         if isinstance(response, dict):
             response["itinerary_id"] = itinerary_id
+            _inject_itinerary_ads(response)
 
         return jsonify(response), 200
     except Exception as e:
         print(f"Error generating itinerary: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _inject_itinerary_ads(response):
+    """Add ad slots between the places / accommodations / restaurants sections of
+    each day in a (non-streaming) itinerary response. Mutates and returns the
+    response. Each day gets a `section_ads` block so the client can place an ad
+    between the sections without disturbing the existing arrays."""
+    if not isinstance(response, dict):
+        return response
+    itinerary = response.get("data", {}).get("detailed_itinerary", {}) or {}
+    for day in itinerary.get("itinerary", []):
+        places = day.get("places_to_visit") or []
+        hotels = day.get("hotels") or []
+        restaurants = day.get("restaurants") or []
+        section_ads = {}
+        # Ad after places (before accommodations) and after accommodations
+        # (before restaurants) — only when both adjacent sections exist.
+        if places and hotels:
+            section_ads["after_places"] = section_ad()
+        if hotels and restaurants:
+            section_ads["after_accommodations"] = section_ad()
+        if section_ads:
+            day["section_ads"] = section_ads
+    # Attach the inline ad slot config for the itinerary section so the client
+    # knows the slot's adtype/dimensions/refresh behavior.
+    response["ads"] = get_inline_ads_config("itinerary_section")
+    return response
 
 
 def _decompose_response_events(response, itinerary_id, skip_events=None):
@@ -71,6 +101,11 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     data = response.get("data", {}) if isinstance(response, dict) else {}
     itinerary = data.get("detailed_itinerary", {}) or {}
 
+    # 0. Inline ad slot config for the itinerary section (so the client knows
+    # the adtype/dimensions/refresh for the `ad` events streamed below).
+    if "ads_config" not in skip_events:
+        yield {"event": "ads_config", "ads": get_inline_ads_config("itinerary_section")}
+
     # 1. Title / description and top-level info. Emit the authoritative values
     # from the generated itinerary unless they were already streamed early.
     if "info" not in skip_events:
@@ -89,15 +124,26 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     if "images" not in skip_events:
         yield {"event": "images", "images": itinerary.get("images", [])}
 
-    # 3. Day by day: places, then restaurants, then hotels — one item per event.
+    # 3. Day by day: places, then an ad, then accommodations, then an ad, then
+    # restaurants — one item per event, ad slots between the sections.
     for day in itinerary.get("itinerary", []):
         day_no = day.get("day")
-        for place in day.get("places_to_visit", []):
+        places = day.get("places_to_visit", [])
+        hotels = day.get("hotels", [])
+        restaurants = day.get("restaurants", [])
+
+        for place in places:
             yield {"event": "place", "day": day_no, "item": place}
-        for restaurant in day.get("restaurants", []):
-            yield {"event": "restaurant", "day": day_no, "item": restaurant}
-        for hotel in day.get("hotels", []):
+        if places and hotels:
+            yield {"event": "ad", "day": day_no, "item": section_ad()}
+
+        for hotel in hotels:
             yield {"event": "hotel", "day": day_no, "item": hotel}
+        if hotels and restaurants:
+            yield {"event": "ad", "day": day_no, "item": section_ad()}
+
+        for restaurant in restaurants:
+            yield {"event": "restaurant", "day": day_no, "item": restaurant}
 
     # 4. Similar places, one per event.
     for similar in itinerary.get("similar_places", []):
@@ -239,6 +285,7 @@ def edit_itinerary():
         response = with_image_urls(result) if isinstance(result, dict) else result
         if isinstance(response, dict):
             response["itinerary_id"] = itinerary_id
+            _inject_itinerary_ads(response)
 
         return jsonify(response), 200
     except Exception as e:

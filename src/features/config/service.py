@@ -6,6 +6,7 @@ can be changed without a deploy.
 """
 
 from core.db import fetch_dicts
+from core.ads import get_ads_config, interleave_ads, get_inline_ads_config
 
 APP_CONFIG = {
     "pages": [
@@ -163,7 +164,7 @@ APP_CONFIG = {
     ],
     "itinerary": {
         "type": "stream" 
-    }
+    },
 }
 
 
@@ -195,13 +196,27 @@ def _load_lookups():
         print(f"[config] failed to load activities: {e}")
         activities = []
 
-    return group_types, food_preferences, activities
+    try:
+        # Reuse the places service so the popularity ranking stays in one place.
+        from features.places.service import query_popular_states
+        popular_states = query_popular_states(10)
+    except Exception as e:
+        print(f"[config] failed to load popular_states: {e}")
+        popular_states = []
+
+    return group_types, food_preferences, activities, popular_states
 
 
 def get_config():
-    group_types, food_preferences, activities = _load_lookups()
+    group_types, food_preferences, activities, popular_states = _load_lookups()
     config = dict(APP_CONFIG)
     config["group_types"] = group_types
     config["food_preferences"] = food_preferences
     config["activities"] = activities
+    # Ad slots interleaved between the popular states, with the matching inline
+    # slot config alongside them. Page-level (sticky/interstitial) ads stay in
+    # the `ads` block; inline configs travel with the content that carries them.
+    config["popular_states"] = interleave_ads(popular_states, "popular_states")
+    config["popular_states_ads"] = get_inline_ads_config("popular_states")
+    config["ads"] = get_ads_config()
     return config

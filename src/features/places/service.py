@@ -109,6 +109,38 @@ def query_by_keyword(keyword, limit=10):
         conn.close()
 
 
+def query_popular_states(limit=10):
+    """Return the most popular states, ranked by the total number of ratings
+    across all places in each state (a proxy for how much the state is visited
+    /reviewed). Each result: {name, total_ratings, place_count}."""
+    conn = new_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT s.id, s.name, "
+            "COALESCE(SUM(p.num_ratings), 0) AS total_ratings, "
+            "COUNT(p.id) AS place_count "
+            "FROM states s "
+            "JOIN cities c ON c.state_id = s.id "
+            "JOIN places p ON p.city_id = c.id "
+            "GROUP BY s.id, s.name "
+            "ORDER BY total_ratings DESC, place_count DESC "
+            "LIMIT %s",
+            (limit,),
+        )
+        return [
+            {
+                "name": r["name"],
+                "total_ratings": int(r["total_ratings"]) if r["total_ratings"] is not None else 0,
+                "place_count": int(r["place_count"]),
+            }
+            for r in cursor.fetchall()
+        ]
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def query_trending():
     conn = new_connection()
     cursor = conn.cursor(dictionary=True)

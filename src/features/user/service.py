@@ -4,6 +4,7 @@ import mysql.connector
 
 from core.db import get_connection
 from core.images import with_image_urls
+from core.ads import interleave_ads
 
 
 def add_favorite(user_id, itinerary_id):
@@ -49,7 +50,7 @@ def get_favorites(user_id):
             del fav["response_json"]
             if fav.get("created_at"):
                 fav["created_at"] = fav["created_at"].isoformat()
-        return favorites, ("success", "", 200)
+        return interleave_ads(favorites, "favorites"), ("success", "", 200)
     except mysql.connector.Error as e:
         return None, ("error", str(e), 500)
     finally:
@@ -118,7 +119,7 @@ def get_history(user_id):
             del item["response_json"]
             if item.get("created_at"):
                 item["created_at"] = item["created_at"].isoformat()
-        return history, ("success", "", 200)
+        return interleave_ads(history, "history"), ("success", "", 200)
     except mysql.connector.Error as e:
         return None, ("error", str(e), 500)
     finally:
