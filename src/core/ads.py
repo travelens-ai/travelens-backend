@@ -33,14 +33,14 @@ INLINE_ADS = {
         "adtype": "banner",
         "width": 320,
         "height": 100,
-        "every": 4,
+        "every": 6,
     },
     "favorites": {
         "adunit": "ca-app-pub-3940256099942544/6300978111",
         "adtype": "native",
         "width": 320,
         "height": 250,
-        "every": 4,
+        "every": 2,
     },
     "history": {
         "adunit": "ca-app-pub-3940256099942544/6300978111",
@@ -74,30 +74,6 @@ INLINE_ADS = {
 #   sticky        — pages that show a persistent anchor/banner ad
 #   interstitial  — pages that show a full-screen interstitial on entry/exit
 STICKY_ADS = {
-    "HOME": {
-        "adunit": "ca-app-pub-3940256099942544/2934735716",
-        "adtype": "sticky_banner",
-        "width": 320,
-        "height": 50,
-    },
-    "SEARCH": {
-        "adunit": "ca-app-pub-3940256099942544/2934735716",
-        "adtype": "sticky_banner",
-        "width": 320,
-        "height": 50,
-    },
-    "FAVORITE": {
-        "adunit": "ca-app-pub-3940256099942544/2934735716",
-        "adtype": "sticky_banner",
-        "width": 320,
-        "height": 50,
-    },
-    "HISTORY": {
-        "adunit": "ca-app-pub-3940256099942544/2934735716",
-        "adtype": "sticky_banner",
-        "width": 320,
-        "height": 50,
-    },
     "ITINERARY": {
         "adunit": "ca-app-pub-3940256099942544/2934735716",
         "adtype": "sticky_banner",
@@ -107,12 +83,6 @@ STICKY_ADS = {
 }
 
 INTERSTITIAL_ADS = {
-    "AI_TRIP_PLANNER": {
-        "adunit": "ca-app-pub-3940256099942544/1033173712",
-        "adtype": "interstitial",
-        "width": 0,
-        "height": 0,
-    },
     "ITINERARY": {
         "adunit": "ca-app-pub-3940256099942544/1033173712",
         "adtype": "interstitial",
