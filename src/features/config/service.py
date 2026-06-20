@@ -161,6 +161,9 @@ APP_CONFIG = {
         {"name": "History", "icon": "time"},
         {"name": "Profile", "icon": "person"},
     ],
+    "itinerary": {
+        "type": "stream" 
+    }
 }
 
 

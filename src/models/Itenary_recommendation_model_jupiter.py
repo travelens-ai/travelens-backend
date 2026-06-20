@@ -554,6 +554,66 @@ class ItenaryRecommendationSystem:
                 'message': str(e)
             }
 
+    def generate_itinerary_stream(self, user_preferences):
+        """Same as generate_itinerary, but a generator that yields progress
+        events as each stage completes. Each yielded value is a dict:
+            {'event': 'progress', 'step': <key>, 'message': <text>}   (per stage)
+            {'event': 'complete', 'data': <full result dict>}         (once, at end)
+            {'event': 'error', 'message': <text>}                     (on failure)
+        The caller (route) is responsible for serializing these to the wire."""
+        try:
+            user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
+            user_preferences['budget'] = user_preferences.get('budget', "")
+
+            yield {'event': 'progress', 'step': 'started', 'message': 'Starting your itinerary...'}
+
+            places = self._get_place_recommendations(user_preferences)
+            places = self._enrich_place_images(places)
+            yield {'event': 'progress', 'step': 'places', 'message': 'Found places to visit'}
+
+            hotels = self._get_hotel_recommendations(user_preferences)
+            yield {'event': 'progress', 'step': 'hotels', 'message': 'Picked hotels'}
+
+            restaurants = self._get_restaurant_recommendations(user_preferences)
+            yield {'event': 'progress', 'step': 'restaurants', 'message': 'Picked restaurants'}
+
+            # Resolve the destination's title and image gallery up front (from
+            # the requested place) so they can be shown before the LLM plan is
+            # built. The final `complete` event still carries the authoritative
+            # values from the generated itinerary.
+            destination = str(user_preferences.get('places_of_interest', '')).strip()
+            dest_city, dest_state = self._parse_city_state(destination)
+            yield {'event': 'progress', 'step': 'info', 'message': 'Preparing your trip details...'}
+            yield {
+                'event': 'info',
+                'name': destination,
+                'description': '',
+                'city': dest_city or destination,
+                'state': dest_state or '',
+                'price_estimated_range': '',
+                'total_days': user_preferences.get('trip_duration'),
+                'notes': '',
+            }
+
+            yield {'event': 'progress', 'step': 'finalizing', 'message': 'Adding images and locations...'}
+            dest_images = self._search_images_by_keywords(
+                [destination, dest_city, dest_state], limit=5,
+            )
+            yield {'event': 'images', 'images': dest_images}
+
+            yield {'event': 'progress', 'step': 'generating', 'message': 'Building your day-by-day plan...'}
+            itinerary = self._generate_detailed_itinerary(
+                user_preferences, places, hotels, restaurants,
+            )
+
+            result = self._finalize_itinerary(itinerary, places)
+
+            yield {'event': 'complete', 'data': result}
+
+        except Exception as e:
+            print("Error while streaming itinerary:", e)
+            yield {'event': 'error', 'message': str(e)}
+
     def edit_itinerary(self, user_preferences):
         """Regenerate an itinerary that MUST include an explicit list of places.
 
