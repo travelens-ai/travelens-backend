@@ -72,6 +72,15 @@ def get_cached_itinerary(cache_key):
     return None, None
 
 
+def _json_default(o):
+    """Coerce DB-sourced Decimals (lat/lon, rating, cost) and other exotic
+    types so json.dumps never fails when persisting an itinerary."""
+    from decimal import Decimal
+    if isinstance(o, Decimal):
+        return float(o)
+    return str(o)
+
+
 def _prune_result_for_storage(result):
     """Return a deep copy of the itinerary result with the bulky/derived parts
     stripped out before persisting: `data.places` and
@@ -97,7 +106,7 @@ def store_itinerary(cache_key, user_preferences, result):
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO itineraries (request_json, response_json, status) VALUES (%s, %s, %s)",
-                (json.dumps(user_preferences), json.dumps(_prune_result_for_storage(result)), "success"),
+                (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success"),
             )
             conn.commit()
             itinerary_id = cursor.lastrowid
@@ -123,7 +132,7 @@ def update_itinerary(cache_key, itinerary_id, user_preferences, result):
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE itineraries SET request_json = %s, response_json = %s, status = %s WHERE id = %s",
-                (json.dumps(user_preferences), json.dumps(_prune_result_for_storage(result)), "success", itinerary_id),
+                (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success", itinerary_id),
             )
             conn.commit()
             updated = cursor.rowcount > 0

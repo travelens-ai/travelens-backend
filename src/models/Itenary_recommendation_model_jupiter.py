@@ -584,10 +584,11 @@ class ItenaryRecommendationSystem:
             destination = str(user_preferences.get('places_of_interest', '')).strip()
             dest_city, dest_state = self._parse_city_state(destination)
             yield {'event': 'progress', 'step': 'info', 'message': 'Preparing your trip details...'}
+            dest_description = self._generate_destination_description(destination)
             yield {
                 'event': 'info',
                 'name': destination,
-                'description': '',
+                'description': dest_description,
                 'city': dest_city or destination,
                 'state': dest_state or '',
                 'price_estimated_range': '',
@@ -1037,6 +1038,29 @@ class ItenaryRecommendationSystem:
         return top_restaurants.sort_values('rating_score', ascending=False).head(100)
 
 
+
+    def _generate_destination_description(self, destination):
+        """Generate a short, friendly 1-2 sentence description for a destination
+        using a simple prompt. Used for the early `info` event so the user sees
+        a description before the full day-by-day plan is built. Returns '' on
+        any failure so streaming is never blocked."""
+        destination = str(destination or "").strip()
+        if not destination:
+            return ""
+        try:
+            prompt = (
+                f"Write a short, engaging 1-2 sentence travel description for "
+                f"{destination}. Only return the description text — no titles, "
+                f"quotes, markdown, or extra commentary."
+            )
+            response = self.client.responses.create(
+                model=self.chat_deployment,
+                input=[{"role": "user", "content": prompt}],
+            )
+            return (response.output_text or "").strip()
+        except Exception as e:
+            print(f"  _generate_destination_description failed for {destination!r}: {e}")
+            return ""
 
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
         prompt = self.generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels)

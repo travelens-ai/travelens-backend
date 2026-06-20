@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 
@@ -138,12 +139,21 @@ def generate_itinerary_stream():
     user_preferences = request.json
     cache_key = json.dumps(user_preferences, sort_keys=True)
 
+    def _json_default(o):
+        # DB-sourced numbers (lat/lon, rating, cost) may be Decimal, which the
+        # stdlib JSON encoder can't serialize — coerce to float so a single bad
+        # value never aborts the stream mid-way (which would drop later events
+        # such as similar_places).
+        if isinstance(o, Decimal):
+            return float(o)
+        return str(o)
+
     def _sse(payload):
         # Emit a named SSE event (so EventSource.addEventListener('images', ...)
         # etc. fire) plus the JSON data line. The event name is also kept inside
         # the JSON for clients that only read the default `message` event.
         event_name = payload.get("event", "message") if isinstance(payload, dict) else "message"
-        return f"event: {event_name}\ndata: {json.dumps(payload)}\n\n"
+        return f"event: {event_name}\ndata: {json.dumps(payload, default=_json_default)}\n\n"
 
     def event_stream():
         try:
