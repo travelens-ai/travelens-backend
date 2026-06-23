@@ -75,13 +75,33 @@ def geocode(query: str):
     return None
 
 
+def build_queries(name, city, state):
+    """Return a list of query strings from most to least specific.
+    More variants = higher OSM hit rate for Indian place names."""
+    n = name.strip()
+    c = city.strip()
+    s = state.strip()
+    seen, queries = set(), []
+    for q in [
+        ", ".join(p for p in [n, c, s, "India"] if p),  # full + India
+        ", ".join(p for p in [n, c, "India"] if p),      # name + city + India
+        ", ".join(p for p in [n, s, "India"] if p),      # name + state + India
+        f"{n} India",                                      # name + India
+        n,                                                 # name only
+    ]:
+        if q and q not in seen:
+            seen.add(q)
+            queries.append(q)
+    return queries
+
+
 def main():
     limit = parse_limit(sys.argv)
     print(f"Updating lat/lon for up to {limit} place(s) without coordinates...")
 
+    # Fetch rows on a short-lived read connection
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor(dictionary=True)
-
     cursor.execute(
         """SELECT p.id, p.name, c.name AS city, s.name AS state
            FROM places p
@@ -94,45 +114,49 @@ def main():
     )
     rows = cursor.fetchall()
     cursor.close()
+    conn.close()
 
     if not rows:
         print("No places need updating. Done.")
-        conn.close()
         return
 
-    update_cursor = conn.cursor()
     updated = skipped = 0
 
     for i, row in enumerate(rows, 1):
-        parts = [str(row.get("name") or "").strip(),
-                 str(row.get("city") or "").strip(),
-                 str(row.get("state") or "").strip()]
-        query = ", ".join(p for p in parts if p)
-        print(f"[{i}/{len(rows)}] id={row['id']} :: {query}")
+        name  = str(row.get("name")  or "").strip()
+        city  = str(row.get("city")  or "").strip()
+        state = str(row.get("state") or "").strip()
+        queries = build_queries(name, city, state)
+        print(f"[{i}/{len(rows)}] id={row['id']} :: {name}, {city}, {state}")
 
-        result = geocode(query)
-        # Fall back to just the name if the full query found nothing.
-        if result is None and parts[0]:
-            result = geocode(parts[0])
+        result = None
+        for q in queries:
+            result = geocode(q)
+            if result is not None:
+                break
 
         if result is None:
             print("    no match — skipped")
             skipped += 1
         else:
             lat, lon, full_address = result
-            update_cursor.execute(
+            # Fresh connection per write — avoids dropped-connection errors on
+            # long-running batches where the idle connection times out remotely.
+            wconn = mysql.connector.connect(**DB_CONFIG)
+            wcursor = wconn.cursor()
+            wcursor.execute(
                 "UPDATE places SET lat = %s, lon = %s, full_address = %s WHERE id = %s",
                 (lat, lon, full_address, row["id"]),
             )
-            conn.commit()
+            wconn.commit()
+            wcursor.close()
+            wconn.close()
             print(f"    -> {lat}, {lon}")
             updated += 1
 
         if i < len(rows):
             time.sleep(REQUEST_DELAY)
 
-    update_cursor.close()
-    conn.close()
     print(f"\nDone. Updated {updated}, skipped {skipped}.")
 
 
