@@ -1196,8 +1196,9 @@ class ItenaryRecommendationSystem:
           - 2–3 restaurants (match cuisine and location).
           - 2–3 hotels (low, mid, and high budget options).
         6. For each place, include:
-          - `name`, `location`, `reason`, `activities`, `rating`, and estimated visit time (e.g., "1.5–2 hours").
-          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. "4.5").
+          - `name`, `location`, `reason`, `activities`, `rating`, estimated visit time (e.g., “1.5–2 hours”), and `opening_hours`.
+          - `opening_hours`: typical operating hours as a short string (e.g., “6:00 AM – 8:00 PM”, “Open 24 hours”, “Tue–Sun: 9:00 AM – 5:00 PM”). Use your knowledge for well-known places; if genuinely unknown, use “Check locally”.
+          - `rating` must be the place’s rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. “4.5”).
         7. For each restaurant, include:
           - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
           - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
@@ -1207,12 +1208,20 @@ class ItenaryRecommendationSystem:
         9. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
         10. Avoid repeating places, hotels, or restaurants on different days.
         11. Keep the travel flow linear — do not plan A → B → A routes.
-        12. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
-        13. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
-        14. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
-        15. Always generate a full response — no placeholder text like “TBD” or “N/A”.
-        16. If budget is provided in the payload, ensure hotels and restaurants fall within it. Otherwise, choose budget automatically based on destination and travel group type.
-        17. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
+        12. The trip starts on "{user_preferences.get('start_date', '')}". Use this to determine the actual day-of-week for each itinerary day (Day 1 = start_date, Day 2 = start_date + 1 day, etc.).
+            - **DO NOT suggest a place on a day it is regularly closed.** For example, if a museum is closed on Tuesdays and Day 2 falls on a Tuesday, swap it with another open place or move it to a different day.
+            - If start_date is not provided, skip this constraint.
+        13. Order `places_to_visit` within each day by opening time — earliest-closing places first:
+            - Places that close before 2:00 PM (e.g., morning markets, some temples) **must appear first**.
+            - Places open until evening or 24 hours can go later in the day.
+            - Religious sites with morning and evening darshan windows — prefer the morning slot.
+            - Sunset viewpoints, night markets, and forts with light-and-sound shows — slot them last.
+        14. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
+        15. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
+        16. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
+        17. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        18. If budget is provided in the payload, ensure hotels and restaurants fall within it. Otherwise, choose budget automatically based on destination and travel group type.
+        19. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
           - places should be from indian_travel_places dataset
           - user’s `places_of_interest`
           - preferred activities
@@ -1220,7 +1229,7 @@ class ItenaryRecommendationSystem:
           - food preferences
           - user location (for budget-friendly or closer alternatives)
           - trip type (Beach, mountain, hill station, Religious site, Nature etc.)
-        18. Don't add NaN if any image or name is not available. Just leave it blank.
+        20. Don’t add NaN if any image or name is not available. Just leave it blank.
 
         ---
 
@@ -1237,6 +1246,7 @@ class ItenaryRecommendationSystem:
                   "reason": "Matches your interest in [e.g. temples, nature]",
                   "activities": ["Activity 1", "Activity 2"],
                   "rating": "X.X",
+                  "opening_hours": "9:00 AM – 6:00 PM",
                   "duration": "1.5–2 hours",
                 }}
               ],
@@ -1360,8 +1370,9 @@ class ItenaryRecommendationSystem:
           - 2–3 restaurants (match cuisine and location).
           - 2–3 hotels (low, mid, and high budget options).
         9. For each place, include:
-          - `name`, `location`, `reason`, `activities`, `rating`, and estimated visit time (e.g., "1.5–2 hours").
-          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. "4.5").
+          - `name`, `location`, `reason`, `activities`, `rating`, estimated visit time (e.g., “1.5–2 hours”), and `opening_hours`.
+          - `opening_hours`: typical operating hours as a short string (e.g., “6:00 AM – 8:00 PM”, “Open 24 hours”, “Tue–Sun: 9:00 AM – 5:00 PM”). Use your knowledge for well-known places; if genuinely unknown, use “Check locally”.
+          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. “4.5”).
         10. For each restaurant, include:
           - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
           - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
@@ -1371,12 +1382,20 @@ class ItenaryRecommendationSystem:
         12. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
         13. Avoid repeating places, hotels, or restaurants on different days.
         14. Keep the travel flow linear — do not plan A → B → A routes.
-        15. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
-        16. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
-        17. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
-        18. Always generate a full response — no placeholder text like “TBD” or “N/A”.
-        19. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on the user's `places_of_interest`, preferred activities, travel group type, food preferences, user location, and trip type. Places should be from the indian_travel_places dataset.
-        20. Don't add NaN if any image or name is not available. Just leave it blank.
+        15. The trip starts on "{user_preferences.get('start_date', '')}". Use this to determine the actual day-of-week for each itinerary day (Day 1 = start_date, Day 2 = start_date + 1 day, etc.).
+            - **DO NOT suggest a place on a day it is regularly closed.** For example, if a museum is closed on Tuesdays and Day 2 falls on a Tuesday, swap it with another open place or move it to a different day.
+            - If start_date is not provided, skip this constraint.
+        16. Order `places_to_visit` within each day by opening time — earliest-closing places first:
+            - Places that close before 2:00 PM (e.g., morning markets, some temples) **must appear first**.
+            - Places open until evening or 24 hours can go later in the day.
+            - Religious sites with morning and evening darshan windows — prefer the morning slot.
+            - Sunset viewpoints, night markets, and forts with light-and-sound shows — slot them last.
+        17. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
+        18. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
+        19. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
+        20. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        21. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on the user's `places_of_interest`, preferred activities, travel group type, food preferences, user location, and trip type. Places should be from the indian_travel_places dataset.
+        22. Don't add NaN if any image or name is not available. Just leave it blank.
 
         ---
 
@@ -1393,6 +1412,7 @@ class ItenaryRecommendationSystem:
                   "reason": "Matches your interest in [e.g. temples, nature]",
                   "activities": ["Activity 1", "Activity 2"],
                   "rating": "X.X",
+                  "opening_hours": "9:00 AM – 6:00 PM",
                   "duration": "1.5–2 hours",
                 }}
               ],
