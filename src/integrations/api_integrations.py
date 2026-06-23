@@ -8,11 +8,20 @@ from datetime import date
 
 DB_PATH = os.path.join("cache", "travelens_cache.db")
 
-DAILY_QUOTA_LIMIT = 200  # hard cap — well within the 1,000/day free tier
+DAILY_QUOTA_LIMIT = 300  # hard cap — well within the 1,000/day free tier
 IMAGES_TTL = 7 * 24 * 3600  # 7 days
 
-# Essentials SKU only — do NOT add places.photos (that triggers Pro SKU billing)
-_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.googleMapsUri"
+# Enterprise SKU (rating/userRatingCount/priceLevel already triggered it).
+# All Pro + Enterprise fields below cost nothing extra — same billing tier.
+# Do NOT add places.photos — that triggers a separate Photos API charge.
+_FIELD_MASK = (
+    "places.id,places.displayName,places.formattedAddress,"
+    "places.location,places.types,places.primaryType,"
+    "places.businessStatus,places.googleMapsUri,"
+    "places.accessibilityOptions,places.timeZone,places.utcOffsetMinutes,"
+    "places.rating,places.userRatingCount,places.priceLevel,places.priceRange,"
+    "places.regularOpeningHours,places.websiteUri,places.nationalPhoneNumber"
+)
 
 PRICE_LEVEL_MAP = {
     "PRICE_LEVEL_FREE": 1,
@@ -234,18 +243,37 @@ class GooglePlacesClient:
             return []
 
     def resolve_place(self, name: str, city: str) -> dict | None:
-        """Resolve a place name to Google Place ID, rating, review count, and Maps URI.
-        Returns None when no result is found or the daily quota is exhausted.
-        One call per place — uses the Essentials SKU, no extra billing."""
+        """Resolve a place to all available Google Places fields.
+        Enterprise SKU already triggered — no extra cost for Pro/Enterprise fields."""
         results = self._fetch(f"{name} {city} India")
         if not results:
             return None
         r = results[0]
+        loc = r.get("location") or {}
+        hours = r.get("regularOpeningHours", {}).get("weekdayDescriptions")
+        pr = r.get("priceRange") or {}
+        start = str(pr.get("startPrice", {}).get("units", "")).strip()
+        end = str(pr.get("endPrice", {}).get("units", "")).strip()
+        price_range_str = f"{start}–{end}".strip("–") or None
+        tz = r.get("timeZone") or {}
+        acc = r.get("accessibilityOptions") or {}
+        types = r.get("types") or []
         return {
             "google_place_id":     r.get("id"),
             "google_rating":       r.get("rating"),
             "google_rating_count": r.get("userRatingCount"),
             "google_maps_uri":     r.get("googleMapsUri"),
+            "lat":                 loc.get("latitude"),
+            "lon":                 loc.get("longitude"),
+            "website_uri":         r.get("websiteUri"),
+            "phone_number":        r.get("nationalPhoneNumber"),
+            "opening_hours":       hours,
+            "place_types":         ", ".join(types[:3]) if types else None,
+            "business_status":     r.get("businessStatus"),
+            "price_level":         r.get("priceLevel"),
+            "price_range":         price_range_str,
+            "timezone":            tz.get("id"),
+            "accessibility":       acc if acc else None,
         }
 
     def search_hotels(self, city: str) -> list:

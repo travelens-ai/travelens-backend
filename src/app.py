@@ -78,20 +78,16 @@ _scheduler = BackgroundScheduler(daemon=True)
 _TEST_MODE = os.getenv("CRON_TEST_MODE", "0") == "1"
 
 if _TEST_MODE:
-    # Test mode: all 3 jobs fire every minute with 2 items each
+    # Test mode: both jobs fire every minute with 2 items each
     print("[cron] TEST MODE — running every 1 minute with batch=2")
     _scheduler.add_job(lambda: _run("update_google_ratings.py", ["--batch", "2"]),
                        "interval", minutes=1, id="google_ratings")
-    _scheduler.add_job(lambda: _run("update_places_lat_lon.py", ["--limit", "2"]),
-                       "interval", minutes=1, id="lat_lon_fill")
     _scheduler.add_job(lambda: _run("fill_missing_images.py", ["--limit", "2"]),
                        "interval", minutes=1, id="image_fill")
 else:
-    # Production: staggered daily/4x-daily schedule
+    # Production: google ratings at 3am (fills lat/lon too), images 4x daily
     _scheduler.add_job(lambda: _run("update_google_ratings.py", ["--batch", "200"]),
                        "cron", hour=3, minute=0, id="google_ratings")
-    _scheduler.add_job(lambda: _run("update_places_lat_lon.py", ["--limit", "250"]),
-                       "cron", hour="1,7,13,19", minute=0, id="lat_lon_fill")
     _scheduler.add_job(lambda: _run("fill_missing_images.py", ["--limit", "100"]),
                        "cron", hour="1,7,13,19", minute=30, id="image_fill")
 

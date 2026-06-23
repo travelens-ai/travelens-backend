@@ -193,7 +193,12 @@ class ItenaryRecommendationSystem:
                        p.prefer_friends AS `prefer for friends`,
                        p.prefer_couple AS `prefer for couple`,
                        p.prefer_family_children AS `prefer for family with children`,
-                       p.prefer_family_no_children AS `prefer for family without children`
+                       p.prefer_family_no_children AS `prefer for family without children`,
+                       p.opening_hours AS opening_hours,
+                       p.website_uri AS website_uri,
+                       p.phone_number AS phone_number,
+                       p.place_types AS place_types,
+                       p.lat AS lat, p.lon AS lon
                 FROM places p
                 LEFT JOIN cities c ON p.city_id = c.id
                 LEFT JOIN states st ON c.state_id = st.id
@@ -777,6 +782,7 @@ class ItenaryRecommendationSystem:
             # Done BEFORE save_new_places so newly-inserted rows carry the same
             # coordinates that go out in the response.
             self._attach_lat_long(itinerary)
+            self._attach_db_fields(itinerary)
 
             if start_date:
                 self._attach_weather(itinerary, start_date)
@@ -892,6 +898,29 @@ class ItenaryRecommendationSystem:
             table, name, result["lat"], result["lon"], result.get("full_address", "")
         )
         return result
+
+    def _attach_db_fields(self, itinerary):
+        """Override LLM-generated opening_hours/website_uri/phone_number with
+        verified Google data from the DB whenever available. Silently skips
+        places not found in the DB lookup."""
+        if self.places_df is None or self.places_df.empty:
+            return
+        db_lookup = {
+            str(r.get("name", "")).strip().lower(): r
+            for r in self.places_df.to_dict(orient="records")
+        }
+        for day in itinerary.get("itinerary", []):
+            for place in day.get("places_to_visit", []):
+                key = str(place.get("name", "")).strip().lower()
+                db = db_lookup.get(key)
+                if not db:
+                    continue
+                if db.get("opening_hours"):
+                    place["opening_hours"] = db["opening_hours"]
+                if db.get("website_uri"):
+                    place["website_uri"] = db["website_uri"]
+                if db.get("phone_number"):
+                    place["phone_number"] = db["phone_number"]
 
     def _attach_lat_long(self, itinerary):
         """Populate `lat`/`lon`/`full_address` on every place, restaurant and

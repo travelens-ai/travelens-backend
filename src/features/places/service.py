@@ -59,9 +59,15 @@ def _row_to_dict(row):
         "prefer for family without children": row.get("prefer_family_no_children"),
         "famous activities with rating": row.get("famous_activities_rating"),
         "image": row.get("image"),
+        "full_address": row.get("full_address"),
         "google_rating": row.get("google_rating"),
         "google_rating_count": row.get("google_rating_count"),
         "google_maps_uri": row.get("google_maps_uri"),
+        "website_uri": row.get("website_uri"),
+        "phone_number": row.get("phone_number"),
+        "opening_hours": row.get("opening_hours"),
+        "place_types": row.get("place_types"),
+        "business_status": row.get("business_status"),
     }
 
 

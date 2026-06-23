@@ -96,12 +96,30 @@ def main():
             skipped += 1
             continue
 
-        print(
-            f"  {'DRY ' if args.dry_run else ''}UPDATE [{place_id}] {name}, {city} "
-            f"→ rating={result['google_rating']} "
-            f"count={result['google_rating_count']} "
-            f"uri={result['google_maps_uri']}"
-        )
+        import json as _json
+        import unicodedata as _ud
+        oh = result.get("opening_hours")
+        acc = result.get("accessibility")
+
+        def _clean(s):
+            return "".join(
+                " " if _ud.category(c) in ("Zs", "Cf") else
+                "-" if _ud.category(c) == "Pd" else c
+                for c in s
+            )
+
+        tag = "DRY " if args.dry_run else ""
+        print(f"  {tag}UPDATE [{place_id}] {name}, {city}")
+        print(f"    rating={result['google_rating']}  count={result['google_rating_count']}")
+        print(f"    phone={result.get('phone_number') or '-'}  website={result.get('website_uri') or '-'}")
+        print(f"    types={result.get('place_types') or '-'}  status={result.get('business_status') or '-'}")
+        print(f"    lat={result.get('lat')}  lon={result.get('lon')}")
+        if oh:
+            print("    hours:")
+            for line in oh:
+                print(f"      {_clean(line)}")
+        else:
+            print("    hours: -")
 
         if not args.dry_run:
             cursor.execute(
@@ -111,7 +129,18 @@ def main():
                     google_rating       = %s,
                     google_rating_count = %s,
                     google_maps_uri     = %s,
-                    google_synced_at    = NOW()
+                    google_synced_at    = NOW(),
+                    lat                 = COALESCE(lat, %s),
+                    lon                 = COALESCE(lon, %s),
+                    website_uri         = %s,
+                    phone_number        = %s,
+                    opening_hours       = %s,
+                    place_types         = %s,
+                    business_status     = %s,
+                    price_level         = %s,
+                    price_range         = %s,
+                    timezone            = %s,
+                    accessibility       = %s
                 WHERE id = %s
                 """,
                 (
@@ -119,6 +148,17 @@ def main():
                     result["google_rating"],
                     result["google_rating_count"],
                     result["google_maps_uri"],
+                    result.get("lat"),
+                    result.get("lon"),
+                    result.get("website_uri"),
+                    result.get("phone_number"),
+                    _json.dumps(oh) if oh else None,
+                    result.get("place_types"),
+                    result.get("business_status"),
+                    result.get("price_level"),
+                    result.get("price_range"),
+                    result.get("timezone"),
+                    _json.dumps(acc) if acc else None,
                     place_id,
                 ),
             )
