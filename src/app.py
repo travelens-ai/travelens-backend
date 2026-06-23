@@ -1,6 +1,10 @@
 import multiprocessing as mp
+import os
 import socket
+import subprocess
+import sys
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
@@ -58,6 +62,33 @@ app.register_blueprint(config_bp)
 init_db_async()
 initialize_recommender()
 load_city_coords()
+
+# ---------------------------------------------------------------------------
+# Background data-fill cron jobs (APScheduler)
+# Each script exits immediately when nothing is left to fill — no wasted calls.
+# ---------------------------------------------------------------------------
+_SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
+
+def _run(script, args=[]):
+    path = os.path.join(_SCRIPTS_DIR, script)
+    subprocess.run([sys.executable, path] + args,
+                   cwd=os.path.dirname(_SCRIPTS_DIR))
+
+_scheduler = BackgroundScheduler(daemon=True)
+
+# Google ratings — once a day at 3 AM, 200 places/run (~$6.40/day, within free tier)
+_scheduler.add_job(lambda: _run("update_google_ratings.py", ["--batch", "200"]),
+                   "cron", hour=3, minute=0, id="google_ratings")
+
+# Lat/lon fill — 4× a day (every 6 hours), 250 places/run = ~1000/day (free, Nominatim)
+_scheduler.add_job(lambda: _run("update_places_lat_lon.py", ["--limit", "250"]),
+                   "cron", hour="1,7,13,19", minute=0, id="lat_lon_fill")
+
+# Image fill — 4× a day (every 6 hours offset by 30 min), 100 images/run = ~400/day
+_scheduler.add_job(lambda: _run("fill_missing_images.py", ["--limit", "100"]),
+                   "cron", hour="1,7,13,19", minute=30, id="image_fill")
+
+_scheduler.start()
 
 
 @app.route("/health", methods=["GET"])

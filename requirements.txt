@@ -32,3 +32,4 @@ python-dotenv
 schedule
 mysql-connector-python
 flasgger
+APScheduler==3.10.4
