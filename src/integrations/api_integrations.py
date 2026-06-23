@@ -12,7 +12,7 @@ DAILY_QUOTA_LIMIT = 200  # hard cap — well within the 1,000/day free tier
 IMAGES_TTL = 7 * 24 * 3600  # 7 days
 
 # Essentials SKU only — do NOT add places.photos (that triggers Pro SKU billing)
-_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.rating,places.priceLevel,places.googleMapsUri"
+_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.priceLevel,places.googleMapsUri"
 
 PRICE_LEVEL_MAP = {
     "PRICE_LEVEL_FREE": 1,
@@ -232,6 +232,21 @@ class GooglePlacesClient:
         except Exception as e:
             print(f"[GooglePlacesClient] fetch error: {e}")
             return []
+
+    def resolve_place(self, name: str, city: str) -> dict | None:
+        """Resolve a place name to Google Place ID, rating, review count, and Maps URI.
+        Returns None when no result is found or the daily quota is exhausted.
+        One call per place — uses the Essentials SKU, no extra billing."""
+        results = self._fetch(f"{name} {city} India")
+        if not results:
+            return None
+        r = results[0]
+        return {
+            "google_place_id":     r.get("id"),
+            "google_rating":       r.get("rating"),
+            "google_rating_count": r.get("userRatingCount"),
+            "google_maps_uri":     r.get("googleMapsUri"),
+        }
 
     def search_hotels(self, city: str) -> list:
         cached = _db_hotels_get(city)

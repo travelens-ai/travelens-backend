@@ -145,7 +145,7 @@ def download_as_webp(url: str, filename: str) -> bool:
     """Download image from URL, convert to webp, save to generated_images/."""
     try:
         from PIL import Image
-        time.sleep(1.5)  # respect Wikimedia rate limits
+        time.sleep(3.0)  # respect Wikimedia rate limits
         resp = requests.get(url, headers=_WIKIMEDIA_HEADERS, timeout=15)
         resp.raise_for_status()
         img = Image.open(BytesIO(resp.content)).convert("RGB")

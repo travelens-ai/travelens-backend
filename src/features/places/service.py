@@ -59,6 +59,9 @@ def _row_to_dict(row):
         "prefer for family without children": row.get("prefer_family_no_children"),
         "famous activities with rating": row.get("famous_activities_rating"),
         "image": row.get("image"),
+        "google_rating": row.get("google_rating"),
+        "google_rating_count": row.get("google_rating_count"),
+        "google_maps_uri": row.get("google_maps_uri"),
     }
 
 
