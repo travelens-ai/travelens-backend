@@ -43,7 +43,8 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
     "database": os.getenv("DB_NAME"),
     "ssl_disabled": True,
-    "connection_timeout": 30,
+    "connection_timeout": 60,
+    "autocommit": False,
 }
 
 WIKIMEDIA_URL = "https://commons.wikimedia.org/w/api.php"
@@ -97,7 +98,7 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
     return []
 
 
-def fetch_image_urls(query: str, count: int = 3) -> list:
+def fetch_image_urls(query: str, count: int = 2) -> list:
     """Collect up to `count` image URLs from Wikimedia → Pexels → Unsplash."""
     urls = []
 
@@ -170,8 +171,18 @@ def upload_to_cdn(filepath: str) -> str:
     return ""
 
 
+def ensure_connection(conn):
+    """Ping and reconnect if the MySQL connection was dropped."""
+    try:
+        conn.ping(reconnect=True, attempts=3, delay=5)
+    except Exception:
+        pass
+    return conn
+
+
 def link_place_image(cursor, conn, place_id: int, image_name: str):
     """Insert image_name into `images`, link to place via `place_image_map`."""
+    ensure_connection(conn)
     cursor.execute(
         """INSERT INTO images (image_name) VALUES (%s)
            ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)""",
@@ -198,7 +209,7 @@ def main(limit=None):
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
         "GROUP BY p.id, p.name, c.name, s.name, p.type "
-        "HAVING img_count < 3"
+        "HAVING img_count < 2"
     )
     rows = read_cursor.fetchall()
     if limit:
@@ -215,7 +226,7 @@ def main(limit=None):
         state = (row["state"] or "").title()
         place_type = (row["type"] or "").title()
         img_count = row.get("img_count", 0)
-        needed = 3 - img_count
+        needed = 2 - img_count
 
         query = f"{name} {place_type} {city} India".strip()
         base_filename = re.sub(r"[^\w\-]", "_", "_".join(p for p in [name, city, state] if p).replace(" ", "_"))
