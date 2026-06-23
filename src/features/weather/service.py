@@ -137,6 +137,39 @@ def _fetch_climate_normals(lat, lon, start_date, num_days):
     return days
 
 
+def get_weather_by_coords(lat, lon, start_date_str, days=1):
+    """Fetch weather for exact coordinates — skips city name lookup.
+    Uses the same 2-hour in-memory cache as get_weather(), keyed by rounded
+    lat/lon (~1 km grid) so nearby places on the same day share one API call."""
+    cache_key = f"{round(lat, 2)}|{round(lon, 2)}|{start_date_str}|{days}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached, None
+
+    try:
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None, "start_date must be in YYYY-MM-DD format."
+
+    days = max(1, min(days, 16))
+    days_away = (start_date - date.today()).days
+
+    try:
+        if days_away <= 16:
+            end_date = (start_date + timedelta(days=days - 1)).strftime("%Y-%m-%d")
+            weather_days = _fetch_forecast(lat, lon, start_date_str, end_date)
+            is_forecast = True
+        else:
+            weather_days = _fetch_climate_normals(lat, lon, start_date, days)
+            is_forecast = False
+    except Exception as e:
+        return None, f"Weather API error: {str(e)}"
+
+    result = {"is_forecast": is_forecast, "weather": weather_days}
+    _cache_set(cache_key, result)
+    return result, None
+
+
 def get_weather(city, start_date_str, days):
     city = city.strip().lower()
     cache_key = f"{city}|{start_date_str}|{days}"

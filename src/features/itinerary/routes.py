@@ -39,6 +39,7 @@ def generate_itinerary():
             response = with_image_urls(cached_result) if isinstance(cached_result, dict) else cached_result
             if isinstance(response, dict):
                 response["itinerary_id"] = cached_id
+                _fix_total_days(response)
                 _inject_itinerary_ads(response)
             return jsonify(response), 200
 
@@ -48,12 +49,26 @@ def generate_itinerary():
         response = with_image_urls(result) if isinstance(result, dict) else result
         if isinstance(response, dict):
             response["itinerary_id"] = itinerary_id
+            _fix_total_days(response)
             _inject_itinerary_ads(response)
 
         return jsonify(response), 200
     except Exception as e:
         print(f"Error generating itinerary: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _fix_total_days(response):
+    """Ensure total_days is always an integer. The LLM sometimes returns it as a
+    string or omits it; fall back to the actual number of day objects."""
+    if not isinstance(response, dict):
+        return response
+    itin = response.get("data", {}).get("detailed_itinerary", {}) or {}
+    try:
+        itin["total_days"] = int(itin["total_days"])
+    except (TypeError, ValueError, KeyError):
+        itin["total_days"] = len(itin.get("itinerary") or [])
+    return response
 
 
 def _inject_itinerary_ads(response):
@@ -285,6 +300,7 @@ def edit_itinerary():
         response = with_image_urls(result) if isinstance(result, dict) else result
         if isinstance(response, dict):
             response["itinerary_id"] = itinerary_id
+            _fix_total_days(response)
             _inject_itinerary_ads(response)
 
         return jsonify(response), 200

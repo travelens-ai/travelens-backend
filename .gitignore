@@ -5,3 +5,9 @@ generated_images
 # Environment variables
 .env
 venv
+.venv
+
+# Auto-generated data files
+*.pkl
+*.db
+similar_places.csv

@@ -545,7 +545,7 @@ class ItenaryRecommendationSystem:
                 restaurants,
             )
 
-            return self._finalize_itinerary(itinerary, places)
+            return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing:", e)
@@ -607,7 +607,7 @@ class ItenaryRecommendationSystem:
                 user_preferences, places, hotels, restaurants,
             )
 
-            result = self._finalize_itinerary(itinerary, places)
+            result = self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
 
             yield {'event': 'complete', 'data': result}
 
@@ -664,7 +664,7 @@ class ItenaryRecommendationSystem:
                 response_text = response_text[:-3]
             itinerary = json.loads(response_text.strip())
 
-            return self._finalize_itinerary(itinerary, places)
+            return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing edit:", e)
@@ -673,7 +673,7 @@ class ItenaryRecommendationSystem:
                 'message': str(e)
             }
 
-    def _finalize_itinerary(self, itinerary, places):
+    def _finalize_itinerary(self, itinerary, places, start_date=None):
         """Shared post-processing for generated/edited itineraries: resolves
         images for each place and the destination gallery, persists new places,
         attaches similar-place images, cleans NaNs, and builds the response."""
@@ -778,6 +778,9 @@ class ItenaryRecommendationSystem:
             # coordinates that go out in the response.
             self._attach_lat_long(itinerary)
 
+            if start_date:
+                self._attach_weather(itinerary, start_date)
+
             # Persist any place the LLM returned that isn't yet in our places
             # table (off the request thread so the response isn't delayed). The
             # itinerary now has lat/lon/full_address attached, so new rows are
@@ -787,6 +790,13 @@ class ItenaryRecommendationSystem:
             # Convert NaN values to empty strings using deep search
             itinerary = json.loads(json.dumps(itinerary, default=lambda x: '' if pd.isna(x) else x))
             places = places.fillna('')
+
+            # Ensure total_days is always an integer — LLM sometimes returns it
+            # as a string or omits it entirely; fall back to actual day count.
+            try:
+                itinerary['total_days'] = int(itinerary['total_days'])
+            except (TypeError, ValueError, KeyError):
+                itinerary['total_days'] = len(itinerary.get('itinerary', []))
 
             return {
                 'status': 'success',
@@ -853,13 +863,27 @@ class ItenaryRecommendationSystem:
         """Resolve lat/lon/full_address for an entity: prefer the DB value, fall
         back to OpenStreetMap Nominatim. On a successful geocode, persist the
         result back to the DB. Returns a dict {'lat','lon','full_address'} or
-        None."""
+        None. Tries multiple query variants to improve Nominatim hit rate."""
         coords = self._db_lat_long(table, name)
         if coords is not None:
             return coords
 
-        query = f"{name}, {location_hint}".strip().strip(",") if location_hint else str(name or "")
-        result = self.geocoder.geocode(query)
+        # Build a list of query variants from most specific to least specific.
+        # Nominatim sometimes fails on very long or unusual names but succeeds
+        # with a shorter name + city hint.
+        name_str = str(name or "").strip()
+        hint = location_hint.strip().strip(",") if location_hint else ""
+        queries = []
+        if hint:
+            queries.append(f"{name_str}, {hint}")   # full name + city/state
+        queries.append(name_str)                     # name only as last resort
+
+        result = None
+        for q in queries:
+            result = self.geocoder.geocode(q)
+            if result is not None:
+                break
+
         if result is None:
             return None
 
@@ -903,6 +927,40 @@ class ItenaryRecommendationSystem:
                 apply(rest, 'restaurants', default_hint)
             for hotel in day.get('hotels', []):
                 apply(hotel, 'hotels', default_hint)
+
+    def _attach_weather(self, itinerary, start_date_str):
+        """Attach per-place weather to every place_to_visit using its lat/lon.
+        Also sets a representative day-level weather summary on each day object.
+        Requires _attach_lat_long to have already run. Silently skips places
+        without coordinates. Uses the 2-hour in-memory cache in weather service."""
+        from datetime import datetime, timedelta
+        from features.weather.service import get_weather_by_coords
+
+        try:
+            trip_start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return
+
+        for i, day in enumerate(itinerary.get('itinerary', [])):
+            day_date = (trip_start + timedelta(days=i)).strftime("%Y-%m-%d")
+            day_weather = None
+
+            for place in day.get('places_to_visit', []):
+                lat = place.get('lat')
+                lon = place.get('lon')
+                if lat is None or lon is None:
+                    place['weather'] = None
+                    continue
+                result, err = get_weather_by_coords(float(lat), float(lon), day_date, days=1)
+                if result and result.get('weather'):
+                    weather_entry = result['weather'][0]
+                    place['weather'] = weather_entry
+                    if day_weather is None:
+                        day_weather = weather_entry
+                else:
+                    place['weather'] = None
+
+            day['weather'] = day_weather
 
     def _get_place_recommendations(self, user_preferences):
         """Get recommended places based on user preferences"""
