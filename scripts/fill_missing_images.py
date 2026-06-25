@@ -17,10 +17,12 @@ Run from project root:
 
 import os
 import re
+import struct
 import sys
 import time
 import requests
-import mysql.connector
+import pyodbc
+from azure.identity import DefaultAzureCredential
 from io import BytesIO
 from dotenv import load_dotenv
 
@@ -36,16 +38,23 @@ CDN_UPLOAD_URL = "https://travelens.in/app/upload.php"
 PEXELS_KEY = os.getenv("PEXELS_API_KEY", "")
 UNSPLASH_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST"),
-    "port": int(os.getenv("DB_PORT", 3306)),
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
-    "database": os.getenv("DB_NAME"),
-    "ssl_disabled": True,
-    "connection_timeout": 60,
-    "autocommit": False,
-}
+_SQL_COPT_SS_ACCESS_TOKEN = 1256
+
+
+def _connect():
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://database.windows.net//.default")
+    token_bytes = token.token.encode("utf-16-le")
+    token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER={os.getenv('AZURE_SQL_SERVER')};"
+        f"DATABASE={os.getenv('AZURE_SQL_DATABASE')};"
+        "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=60;"
+    )
+    conn = pyodbc.connect(conn_str, attrs_before={_SQL_COPT_SS_ACCESS_TOKEN: token_struct})
+    conn.autocommit = False
+    return conn
 
 WIKIMEDIA_URL = "https://commons.wikimedia.org/w/api.php"
 _SKIP_WORDS = {"map", "logo", "icon", "flag", "svg", "diagram", "coat", "plan", "stamp", "chart"}
@@ -171,34 +180,35 @@ def upload_to_cdn(filepath: str) -> str:
     return ""
 
 
-def ensure_connection(conn):
-    """Ping and reconnect if the MySQL connection was dropped."""
-    try:
-        conn.ping(reconnect=True, attempts=3, delay=5)
-    except Exception:
-        pass
-    return conn
-
-
 def link_place_image(cursor, conn, place_id: int, image_name: str):
     """Insert image_name into `images`, link to place via `place_image_map`."""
-    ensure_connection(conn)
+    # Upsert image row and retrieve its id
     cursor.execute(
-        """INSERT INTO images (image_name) VALUES (%s)
-           ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)""",
+        """
+        MERGE images AS tgt
+        USING (SELECT ? AS image_name) AS src ON tgt.image_name = src.image_name
+        WHEN NOT MATCHED THEN INSERT (image_name) VALUES (src.image_name);
+        """,
         (image_name,),
     )
-    image_id = cursor.lastrowid
+    cursor.execute("SELECT id FROM images WHERE image_name = ?", (image_name,))
+    row = cursor.fetchone()
+    image_id = row[0] if row else None
+    if image_id is None:
+        return
     cursor.execute(
-        "INSERT IGNORE INTO place_image_map (place_id, image_id) VALUES (%s, %s)",
-        (place_id, image_id),
+        """
+        IF NOT EXISTS (SELECT 1 FROM place_image_map WHERE place_id = ? AND image_id = ?)
+            INSERT INTO place_image_map (place_id, image_id) VALUES (?, ?)
+        """,
+        (place_id, image_id, place_id, image_id),
     )
     conn.commit()
 
 
 def main(limit=None):
-    conn = mysql.connector.connect(**DB_CONFIG)
-    read_cursor = conn.cursor(dictionary=True)
+    conn = _connect()
+    read_cursor = conn.cursor()
     write_cursor = conn.cursor()
 
     read_cursor.execute(
@@ -209,9 +219,10 @@ def main(limit=None):
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
         "GROUP BY p.id, p.name, c.name, s.name, p.type "
-        "HAVING img_count < 2"
+        "HAVING COUNT(pim.image_id) < 2"
     )
-    rows = read_cursor.fetchall()
+    cols = [col[0] for col in read_cursor.description]
+    rows = [dict(zip(cols, row)) for row in read_cursor.fetchall()]
     if limit:
         rows = rows[:limit]
     total = len(rows)

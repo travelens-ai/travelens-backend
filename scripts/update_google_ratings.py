@@ -14,10 +14,12 @@ Usage:
 """
 import argparse
 import os
+import struct
 import sys
 import time
 
-import mysql.connector
+import pyodbc
+from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
 # Load .env from project root (script lives in scripts/, so go one level up)
@@ -27,44 +29,53 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from integrations.api_integrations import GooglePlacesClient
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST"),
-    "port": int(os.getenv("DB_PORT", 3306)),
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
-    "database": os.getenv("DB_NAME"),
-    "ssl_disabled": os.getenv("DB_SSL_DISABLED", "true").lower() == "true",
-    "connection_timeout": 30,
-}
+_SQL_COPT_SS_ACCESS_TOKEN = 1256
 
 STALE_DAYS = 90  # re-fetch places not synced in this many days
+
+
+def _connect():
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://database.windows.net//.default")
+    token_bytes = token.token.encode("utf-16-le")
+    token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
+    conn_str = (
+        "DRIVER={ODBC Driver 18 for SQL Server};"
+        f"SERVER={os.getenv('AZURE_SQL_SERVER')};"
+        f"DATABASE={os.getenv('AZURE_SQL_DATABASE')};"
+        "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+    )
+    return pyodbc.connect(conn_str, attrs_before={_SQL_COPT_SS_ACCESS_TOKEN: token_struct})
+
+
+def _rows_as_dicts(cursor) -> list:
+    cols = [col[0] for col in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
 
 def get_places(cursor, batch: int, force_refresh: bool) -> list:
     if force_refresh:
         cursor.execute(
             """
-            SELECT p.id, p.name, c.name AS city
+            SELECT TOP (?) p.id, p.name, c.name AS city
             FROM places p
             JOIN cities c ON p.city_id = c.id
-            LIMIT %s
             """,
             (batch,),
         )
     else:
         cursor.execute(
             """
-            SELECT p.id, p.name, c.name AS city
+            SELECT TOP (?) p.id, p.name, c.name AS city
             FROM places p
             JOIN cities c ON p.city_id = c.id
             WHERE p.google_place_id IS NULL
-               OR p.google_synced_at < DATE_SUB(NOW(), INTERVAL %s DAY)
-            ORDER BY p.google_place_id IS NULL DESC
-            LIMIT %s
+               OR p.google_synced_at < DATEADD(day, -?, GETDATE())
+            ORDER BY CASE WHEN p.google_place_id IS NULL THEN 0 ELSE 1 END
             """,
-            (STALE_DAYS, batch),
+            (batch, STALE_DAYS),
         )
-    return cursor.fetchall()
+    return _rows_as_dicts(cursor)
 
 
 def main():
@@ -75,8 +86,8 @@ def main():
     args = parser.parse_args()
 
     client = GooglePlacesClient()
-    conn = mysql.connector.connect(**DB_CONFIG)
-    cursor = conn.cursor(dictionary=True)
+    conn = _connect()
+    cursor = conn.cursor()
 
     places = get_places(cursor, args.batch, args.force_refresh)
     print(f"[update_google_ratings] {len(places)} place(s) to process (batch={args.batch}, dry_run={args.dry_run})")
@@ -125,23 +136,23 @@ def main():
             cursor.execute(
                 """
                 UPDATE places
-                SET google_place_id     = %s,
-                    google_rating       = %s,
-                    google_rating_count = %s,
-                    google_maps_uri     = %s,
-                    google_synced_at    = NOW(),
-                    lat                 = COALESCE(lat, %s),
-                    lon                 = COALESCE(lon, %s),
-                    website_uri         = %s,
-                    phone_number        = %s,
-                    opening_hours       = %s,
-                    place_types         = %s,
-                    business_status     = %s,
-                    price_level         = %s,
-                    price_range         = %s,
-                    timezone            = %s,
-                    accessibility       = %s
-                WHERE id = %s
+                SET google_place_id     = ?,
+                    google_rating       = ?,
+                    google_rating_count = ?,
+                    google_maps_uri     = ?,
+                    google_synced_at    = GETDATE(),
+                    lat                 = COALESCE(lat, ?),
+                    lon                 = COALESCE(lon, ?),
+                    website_uri         = ?,
+                    phone_number        = ?,
+                    opening_hours       = ?,
+                    place_types         = ?,
+                    business_status     = ?,
+                    price_level         = ?,
+                    price_range         = ?,
+                    timezone            = ?,
+                    accessibility       = ?
+                WHERE id = ?
                 """,
                 (
                     result["google_place_id"],
