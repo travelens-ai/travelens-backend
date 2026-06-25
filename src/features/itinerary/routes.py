@@ -22,6 +22,19 @@ def generate_itinerary():
         required: true
         schema:
           type: object
+          example:
+            places_of_interest: "Goa, Goa"
+            user_location: "Mumbai"
+            trip_duration: 4
+            number_of_people: 3
+            travel_group_type: "friends"
+            food_preferences: "North Indian, Seafood"
+            preferred_activities: ["Beach", "Nightlife", "Sightseeing"]
+            trip_type: "Beach"
+            current_month: "July"
+            start_date: "2026-07-15"
+            budget: "25000"
+            suggested_places: []
     responses:
       200:
         description: Itinerary generated
@@ -188,6 +201,19 @@ def generate_itinerary_stream():
         required: true
         schema:
           type: object
+          example:
+            places_of_interest: "Manali, Himachal Pradesh"
+            user_location: "Delhi"
+            trip_duration: 5
+            number_of_people: 2
+            travel_group_type: "couple"
+            food_preferences: "North Indian"
+            preferred_activities: ["Trekking", "Snow"]
+            trip_type: "Mountain"
+            current_month: "July"
+            start_date: "2026-07-20"
+            budget: "30000"
+            suggested_places: []
     responses:
       200:
         description: text/event-stream of progress events then the itinerary, streamed in pieces
@@ -269,9 +295,22 @@ def edit_itinerary():
       - in: body
         name: body
         required: true
-        description: Same payload as /generate-itinerary plus a `places` list of place names that must be included, and an `itinerary_id` of the itinerary to update in place
         schema:
           type: object
+          example:
+            itinerary_id: 1
+            places_of_interest: "Goa, Goa"
+            user_location: "Mumbai"
+            trip_duration: 4
+            number_of_people: 3
+            travel_group_type: "friends"
+            food_preferences: "North Indian, Seafood"
+            preferred_activities: ["Beach", "Sightseeing"]
+            trip_type: "Beach"
+            current_month: "July"
+            suggested_places: ["Baga Beach", "Dudhsagar Falls"]
+            budget: "25000"
+            start_date: "2026-07-15"
     responses:
       200:
         description: Itinerary regenerated with the required places
