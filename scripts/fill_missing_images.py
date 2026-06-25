@@ -6,7 +6,7 @@ For each such place, fetches up to 5 images from:
 
 Each image is:
   1. Downloaded and converted to .webp
-  2. Uploaded to CDN via https://travelens.in/app/upload.php
+  2. Uploaded to CDN via direct IP (bypasses Hostinger firewall on Azure outbound IPs)
   3. Inserted into `images` table (filename only)
   4. Linked in `place_image_map`
 
@@ -20,8 +20,12 @@ import re
 import struct
 import sys
 import time
+import warnings
 import requests
+import urllib3
 import pyodbc
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from azure.identity import DefaultAzureCredential
 from io import BytesIO
 from dotenv import load_dotenv
@@ -33,7 +37,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 PEXELS_URL = "https://api.pexels.com/v1/search"
 UNSPLASH_URL = "https://api.unsplash.com/search/photos"
-CDN_UPLOAD_URL = "https://travelens.in/app/upload.php"
+CDN_UPLOAD_URL = f"https://{os.getenv('CDN_HOSTINGER_IP')}/app/upload.php"
 
 PEXELS_KEY = os.getenv("PEXELS_API_KEY", "")
 UNSPLASH_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
@@ -59,7 +63,7 @@ def _connect():
 WIKIMEDIA_URL = "https://commons.wikimedia.org/w/api.php"
 _SKIP_WORDS = {"map", "logo", "icon", "flag", "svg", "diagram", "coat", "plan", "stamp", "chart"}
 _WIKIMEDIA_HEADERS = {
-    "User-Agent": "TravelensImageBot/1.0 (travelens-backend; image-fill script)"
+    "User-Agent": "TravelensImageBot/1.0 (info@travelens.in; https://travelens.in) Python-Requests"
 }
 
 
@@ -76,7 +80,8 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
                 "gsrnamespace": 6,
                 "gsrlimit": count * 3,
                 "prop": "imageinfo",
-                "iiprop": "url|size|mime",
+                "iiprop": "url|size|mime|thumburl",
+                "iiurlwidth": 1200,
                 "format": "json",
             },
             timeout=10,
@@ -90,7 +95,6 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
                 break
             ii = page.get("imageinfo", [{}])[0]
             mime = ii.get("mime", "")
-            url = ii.get("url", "")
             w = ii.get("width", 0)
             h = ii.get("height", 0)
             title = page.get("title", "").lower()
@@ -100,7 +104,10 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
                 continue
             if any(word in title for word in _SKIP_WORDS):
                 continue
-            urls.append(url)
+            # prefer the scaled thumbnail URL — datacenter IPs get 429 on raw originals
+            url = ii.get("thumburl") or ii.get("url", "")
+            if url:
+                urls.append(url)
         return urls
     except Exception as e:
         print(f"  [Wikimedia] error: {e}")
@@ -171,7 +178,13 @@ def upload_to_cdn(filepath: str) -> str:
     """Upload file to CDN, return filename only (not full URL)."""
     try:
         with open(filepath, "rb") as f:
-            resp = requests.post(CDN_UPLOAD_URL, files={"file": f}, timeout=30)
+            resp = requests.post(
+                CDN_UPLOAD_URL,
+                files={"file": f},
+                headers={"Host": "travelens.in"},
+                timeout=30,
+                verify=False,
+            )
         if resp.status_code == 200:
             path = resp.json().get("path", "")
             return os.path.basename(path)
