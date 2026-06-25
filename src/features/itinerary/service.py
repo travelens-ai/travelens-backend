@@ -101,8 +101,8 @@ def _prune_result_for_storage(result):
 def store_itinerary(cache_key, user_preferences, result):
     itinerary_id = None
     if is_db_ready():
+        conn = get_connection()
         try:
-            conn = get_connection()
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO itineraries (request_json, response_json, status) VALUES (?, ?, ?)",
@@ -114,6 +114,8 @@ def store_itinerary(cache_key, user_preferences, result):
             cursor.close()
         except Exception as db_err:
             print(f"Failed to store itinerary: {db_err}")
+        finally:
+            conn.close()
     _itinerary_cache[cache_key] = (time.time(), result, itinerary_id)
     return itinerary_id
 
@@ -128,8 +130,8 @@ def update_itinerary(cache_key, itinerary_id, user_preferences, result):
 
     updated = False
     if is_db_ready():
+        conn = get_connection()
         try:
-            conn = get_connection()
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE itineraries SET request_json = ?, response_json = ?, status = ? WHERE id = ?",
@@ -140,6 +142,8 @@ def update_itinerary(cache_key, itinerary_id, user_preferences, result):
             cursor.close()
         except Exception as db_err:
             print(f"Failed to update itinerary {itinerary_id}: {db_err}")
+        finally:
+            conn.close()
 
     if not updated:
         # Row not found (or DB write failed) — fall back to a fresh insert so

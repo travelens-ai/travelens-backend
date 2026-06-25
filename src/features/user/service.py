@@ -43,6 +43,7 @@ def add_favorite(user_id, itinerary_id):
         return False, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def get_favorites(user_id):
@@ -69,6 +70,7 @@ def get_favorites(user_id):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def remove_favorite(user_id, itinerary_id):
@@ -88,6 +90,7 @@ def remove_favorite(user_id, itinerary_id):
         return False, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def add_history(user_id, itinerary_id):
@@ -114,6 +117,7 @@ def add_history(user_id, itinerary_id):
         return False, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def get_history(user_id):
@@ -140,3 +144,4 @@ def get_history(user_id):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()

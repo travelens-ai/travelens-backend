@@ -32,5 +32,6 @@ python-dotenv
 schedule
 pyodbc
 azure-identity
+SQLAlchemy>=2.0
 flasgger
 APScheduler==3.10.4

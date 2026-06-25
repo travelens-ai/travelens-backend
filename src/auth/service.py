@@ -52,6 +52,7 @@ def send_otp_internal(email, purpose):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def create_otp_record(email, purpose):
@@ -87,6 +88,7 @@ def create_otp_record(email, purpose):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def verify_otp_record(email, otp, purpose):
@@ -112,6 +114,7 @@ def verify_otp_record(email, otp, purpose):
         return False, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def create_user(name, email, password, phone=None, age=None, gender=None, trip_type=None, trip_companion=None, device_id=None):
@@ -155,6 +158,7 @@ def create_user(name, email, password, phone=None, age=None, gender=None, trip_t
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def authenticate_user(email, password):
@@ -182,6 +186,7 @@ def authenticate_user(email, password):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def reset_user_password(email, otp, new_password):
@@ -205,6 +210,7 @@ def reset_user_password(email, otp, new_password):
         return False, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def update_user_profile(user_id, data):
@@ -247,6 +253,7 @@ def update_user_profile(user_id, data):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
 
 
 def google_upsert_user(google_id, email, name, picture, device_id=None):
@@ -285,3 +292,4 @@ def google_upsert_user(google_id, email, name, picture, device_id=None):
         return None, ("error", str(e), 500)
     finally:
         cursor.close()
+        conn.close()
