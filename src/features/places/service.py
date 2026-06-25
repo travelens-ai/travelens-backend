@@ -15,6 +15,11 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _cursor_to_dicts(cursor):
+    cols = [col[0] for col in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
 def is_coords_loaded():
     return _city_coords_loaded
 
@@ -24,9 +29,9 @@ def load_city_coords():
         global _city_coords_cache, _city_coords_loaded
         try:
             conn = new_connection()
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor()
             cursor.execute("SELECT name, lat, lon FROM cities")
-            rows = cursor.fetchall()
+            rows = _cursor_to_dicts(cursor)
             cursor.close()
             conn.close()
             for row in rows:
@@ -89,16 +94,16 @@ def query_by_keyword(keyword, limit=10):
     sources = [("cities", "city", 0), ("states", "state", 1), ("places", "place", 2)]
 
     conn = new_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
         results = []
         for table, type_label, rank in sources:
             cursor.execute(
-                f"SELECT name FROM {table} WHERE name LIKE %s",
+                f"SELECT name FROM {table} WHERE name LIKE ?",
                 (like,),
             )
             for row in cursor.fetchall():
-                name = row["name"]
+                name = row[0]
                 results.append({
                     "name": name,
                     "type": type_label,
@@ -123,7 +128,7 @@ def query_popular_states(limit=10):
     across all places in each state (a proxy for how much the state is visited
     /reviewed). Each result: {name, total_ratings, place_count}."""
     conn = new_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
         cursor.execute(
             "SELECT s.id, s.name, "
@@ -134,14 +139,14 @@ def query_popular_states(limit=10):
             "JOIN places p ON p.city_id = c.id "
             "GROUP BY s.id, s.name "
             "ORDER BY total_ratings DESC, place_count DESC "
-            "LIMIT %s",
+            "OFFSET 0 ROWS FETCH NEXT (?) ROWS ONLY",
             (limit,),
         )
         return [
             {
-                "name": r["name"],
-                "total_ratings": int(r["total_ratings"]) if r["total_ratings"] is not None else 0,
-                "place_count": int(r["place_count"]),
+                "name": r[1],
+                "total_ratings": int(r[2]) if r[2] is not None else 0,
+                "place_count": int(r[3]),
             }
             for r in cursor.fetchall()
         ]
@@ -152,16 +157,16 @@ def query_popular_states(limit=10):
 
 def query_trending():
     conn = new_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT p.*, c.name AS city, s.name AS state "
+            "SELECT TOP (10) p.*, c.name AS city, s.name AS state "
             "FROM places p "
             "LEFT JOIN cities c ON p.city_id = c.id "
             "LEFT JOIN states s ON c.state_id = s.id "
-            "WHERE p.num_ratings IS NOT NULL ORDER BY p.num_ratings DESC LIMIT 10"
+            "WHERE p.num_ratings IS NOT NULL ORDER BY p.num_ratings DESC"
         )
-        return [_row_to_dict(r) for r in cursor.fetchall()]
+        return [_row_to_dict(r) for r in _cursor_to_dicts(cursor)]
     finally:
         cursor.close()
         conn.close()
@@ -169,7 +174,7 @@ def query_trending():
 
 def query_nearby(lat, lon):
     conn = new_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
         cursor.execute(
             "SELECT p.*, c.name AS city, s.name AS state, c.lat AS city_lat, c.lon AS city_lon "
@@ -177,7 +182,7 @@ def query_nearby(lat, lon):
             "JOIN cities c ON p.city_id = c.id "
             "LEFT JOIN states s ON c.state_id = s.id"
         )
-        rows = cursor.fetchall()
+        rows = _cursor_to_dicts(cursor)
     finally:
         cursor.close()
         conn.close()
@@ -194,7 +199,7 @@ def query_nearby(lat, lon):
 
 def query_weekend(lat, lon):
     conn = new_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
         cursor.execute(
             "SELECT p.*, c.name AS city, s.name AS state, c.lat AS city_lat, c.lon AS city_lon "
@@ -202,7 +207,7 @@ def query_weekend(lat, lon):
             "JOIN cities c ON p.city_id = c.id "
             "LEFT JOIN states s ON c.state_id = s.id"
         )
-        rows = cursor.fetchall()
+        rows = _cursor_to_dicts(cursor)
     finally:
         cursor.close()
         conn.close()

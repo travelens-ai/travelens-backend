@@ -30,6 +30,7 @@ google-genai>=1.55.0
 flask-cors
 python-dotenv
 schedule
-mysql-connector-python==8.4.0
+pyodbc
+azure-identity
 flasgger
 APScheduler==3.10.4

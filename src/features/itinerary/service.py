@@ -105,11 +105,12 @@ def store_itinerary(cache_key, user_preferences, result):
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO itineraries (request_json, response_json, status) VALUES (%s, %s, %s)",
+                "INSERT INTO itineraries (request_json, response_json, status) VALUES (?, ?, ?)",
                 (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success"),
             )
+            cursor.execute("SELECT SCOPE_IDENTITY()")
+            itinerary_id = int(cursor.fetchone()[0])
             conn.commit()
-            itinerary_id = cursor.lastrowid
             cursor.close()
         except Exception as db_err:
             print(f"Failed to store itinerary: {db_err}")
@@ -131,7 +132,7 @@ def update_itinerary(cache_key, itinerary_id, user_preferences, result):
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE itineraries SET request_json = %s, response_json = %s, status = %s WHERE id = %s",
+                "UPDATE itineraries SET request_json = ?, response_json = ?, status = ? WHERE id = ?",
                 (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success", itinerary_id),
             )
             conn.commit()

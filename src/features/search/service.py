@@ -6,6 +6,11 @@ _search_cache = {}
 CACHE_TTL = 300  # 5 minutes
 
 
+def _cursor_to_dicts(cursor):
+    cols = [col[0] for col in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+
 def search(q, limit=10):
     q_lower = q.strip().lower()
     limit = min(limit, 20)
@@ -16,16 +21,16 @@ def search(q, limit=10):
         return cached[1]
 
     conn = new_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT c.name, s.name AS state "
+            "SELECT TOP (?) c.name, s.name AS state "
             "FROM cities c LEFT JOIN states s ON c.state_id = s.id "
-            "WHERE c.name LIKE %s LIMIT %s",
-            (q_lower + "%", limit),
+            "WHERE c.name LIKE ?",
+            (limit, q_lower + "%"),
         )
         cities = [
-            {"type": "city", "name": r["name"].title(), "state": r["state"]}
+            {"type": "city", "name": r[0].title(), "state": r[1]}
             for r in cursor.fetchall()
         ]
 
@@ -33,19 +38,19 @@ def search(q, limit=10):
         places = []
         if remaining > 0:
             cursor.execute(
-                "SELECT p.name, c.name AS city, s.name AS state "
+                "SELECT TOP (?) p.name, c.name AS city, s.name AS state "
                 "FROM places p "
                 "LEFT JOIN cities c ON p.city_id = c.id "
                 "LEFT JOIN states s ON c.state_id = s.id "
-                "WHERE p.name LIKE %s LIMIT %s",
-                (q_lower + "%", remaining),
+                "WHERE p.name LIKE ?",
+                (remaining, q_lower + "%"),
             )
             places = [
                 {
                     "type": "place",
-                    "name": r["name"].title(),
-                    "city": r["city"].title() if r["city"] else None,
-                    "state": r["state"],
+                    "name": r[0].title(),
+                    "city": r[1].title() if r[1] else None,
+                    "state": r[2],
                 }
                 for r in cursor.fetchall()
             ]
