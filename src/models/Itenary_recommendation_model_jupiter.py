@@ -184,20 +184,20 @@ class ItenaryRecommendationSystem:
                 """
                 SELECT p.name AS name, p.type AS type,
                        c.name AS city, st.name AS state,
-                       p.rating AS rating, p.num_ratings AS `no of rating`,
-                       p.best_month AS `best month to visit`,
-                       p.famous_activities AS `famous activities`,
-                       p.famous_activities_rating AS `famous activities with rating`,
-                       (SELECT i.image_name FROM place_image_map pim
+                       p.rating AS rating, p.num_ratings AS [no of rating],
+                       p.best_month AS [best month to visit],
+                       p.famous_activities AS [famous activities],
+                       p.famous_activities_rating AS [famous activities with rating],
+                       (SELECT TOP 1 i.image_name FROM place_image_map pim
                           JOIN images i ON pim.image_id = i.id
-                         WHERE pim.place_id = p.id LIMIT 1) AS image,
-                       p.dist_airport AS `distance from airport`,
-                       p.dist_bus_stand AS `distance from bus stand`,
-                       p.dist_railway AS `distance from railway station`,
-                       p.prefer_friends AS `prefer for friends`,
-                       p.prefer_couple AS `prefer for couple`,
-                       p.prefer_family_children AS `prefer for family with children`,
-                       p.prefer_family_no_children AS `prefer for family without children`,
+                         WHERE pim.place_id = p.id) AS image,
+                       p.dist_airport AS [distance from airport],
+                       p.dist_bus_stand AS [distance from bus stand],
+                       p.dist_railway AS [distance from railway station],
+                       p.prefer_friends AS [prefer for friends],
+                       p.prefer_couple AS [prefer for couple],
+                       p.prefer_family_children AS [prefer for family with children],
+                       p.prefer_family_no_children AS [prefer for family without children],
                        p.opening_hours AS opening_hours,
                        p.website_uri AS website_uri,
                        p.phone_number AS phone_number,
@@ -226,7 +226,7 @@ class ItenaryRecommendationSystem:
         if not names:
             return {}
         try:
-            placeholders = ",".join(["%s"] * len(names))
+            placeholders = ",".join(["?"] * len(names))
             rows = fetch_dicts(
                 f"""SELECT LOWER(p.name) AS name, i.image_name AS image
                     FROM places p
@@ -266,9 +266,9 @@ class ItenaryRecommendationSystem:
             escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             try:
                 rows = fetch_dicts(
-                    "SELECT image_name FROM images WHERE LOWER(image_name) LIKE %s "
-                    "ORDER BY id LIMIT %s",
-                    ("%" + escaped + "%", limit),
+                    "SELECT TOP (?) image_name FROM images WHERE LOWER(image_name) LIKE ? "
+                    "ORDER BY id",
+                    (limit, "%" + escaped + "%"),
                 )
             except Exception as e:
                 print(f"  _search_images_by_keywords failed for {kw!r} ({e})")
@@ -869,9 +869,8 @@ class ItenaryRecommendationSystem:
         name_col = "property_name" if table == "hotels" else "name"
         try:
             rows = fetch_dicts(
-                f"SELECT lat, lon, full_address FROM {table} "
-                f"WHERE LOWER({name_col}) = %s AND lat IS NOT NULL AND lon IS NOT NULL "
-                f"LIMIT 1",
+                f"SELECT TOP 1 lat, lon, full_address FROM {table} "
+                f"WHERE LOWER({name_col}) = ? AND lat IS NOT NULL AND lon IS NOT NULL",
                 (str(name).strip().lower(),),
             )
         except Exception as e:
@@ -898,11 +897,10 @@ class ItenaryRecommendationSystem:
             conn = new_connection()
             cursor = conn.cursor()
             cursor.execute(
-                f"UPDATE {table} SET lat = %s, lon = %s, full_address = %s "
-                f"WHERE LOWER({name_col}) = %s AND (lat IS NULL OR lon IS NULL)",
+                f"UPDATE {table} SET lat = ?, lon = ?, full_address = ? "
+                f"WHERE LOWER({name_col}) = ? AND (lat IS NULL OR lon IS NULL)",
                 (lat, lon, full_address, str(name).strip().lower()),
             )
-            conn.commit()
             cursor.close()
             conn.close()
         except Exception as e:
@@ -1678,7 +1676,7 @@ class ItenaryRecommendationSystem:
                 famous = ", ".join(activities) if isinstance(activities, list) and activities else None
                 cursor.execute(
                     "INSERT INTO places (name, city_id, famous_activities, lat, lon, full_address) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (key, city_id, famous, lat, lon, full_address or None),
                 )
                 inserted += 1
@@ -1711,7 +1709,7 @@ class ItenaryRecommendationSystem:
                 cursor.execute(
                     """INSERT INTO hotels
                        (property_name, property_type, city, state, site_review_rating, pageurl, lat, lon, full_address)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (name, str(hotel.get('type', '')).strip() or None,
                      city, state, self._to_decimal(hotel.get('rating')),
                      str(hotel.get('link', '')).strip() or None,
@@ -1749,7 +1747,7 @@ class ItenaryRecommendationSystem:
                 cursor.execute(
                     """INSERT INTO restaurants
                        (name, locality, city, cuisine, rating, cost, lat, lon, full_address)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (name, str(r.get('location', '')).strip() or None, city,
                      str(r.get('cuisine', '')).strip() or None,
                      self._to_decimal(r.get('rating')),
@@ -1766,7 +1764,7 @@ class ItenaryRecommendationSystem:
         doesn't exist. Returns None when no city name is available."""
         if not city:
             return None
-        cursor.execute("SELECT id FROM cities WHERE name = %s", (city,))
+        cursor.execute("SELECT id FROM cities WHERE name = ?", (city,))
         row = cursor.fetchone()
         if row:
             return row[0]
@@ -1775,15 +1773,16 @@ class ItenaryRecommendationSystem:
         state_id = None
         if state:
             cursor.execute(
-                "SELECT id FROM states WHERE LOWER(name) = %s", (state.lower(),)
+                "SELECT id FROM states WHERE LOWER(name) = ?", (state.lower(),)
             )
             srow = cursor.fetchone()
             if srow:
                 state_id = srow[0]
         cursor.execute(
-            "INSERT INTO cities (name, state_id) VALUES (%s, %s)", (city, state_id)
+            "INSERT INTO cities (name, state_id) VALUES (?, ?)", (city, state_id)
         )
-        return cursor.lastrowid
+        cursor.execute("SELECT SCOPE_IDENTITY()")
+        return int(cursor.fetchone()[0])
 
 
     def _calculate_similarity_scores(self, text1, text2):
