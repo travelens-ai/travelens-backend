@@ -2,6 +2,7 @@ import os
 import json
 import time
 import sqlite3
+import threading
 import requests
 from datetime import date
 
@@ -154,13 +155,25 @@ class NominatimClient:
     def __init__(self):
         self.user_agent = os.getenv("NOMINATIM_USER_AGENT", "travelens-backend/1.0")
 
+    _last_call_lock = threading.Lock()
+    _last_call_time = 0.0
+
+    def _rate_limit(self):
+        with NominatimClient._last_call_lock:
+            now = time.monotonic()
+            wait = 1.1 - (now - NominatimClient._last_call_time)
+            if wait > 0:
+                time.sleep(wait)
+            NominatimClient._last_call_time = time.monotonic()
+
     def geocode(self, query: str):
         """Resolve a query to {'lat', 'lon', 'full_address'}. Returns None when
-        nothing is found or the request fails."""
+        nothing is found or the request fails. Enforces Nominatim's 1 req/sec policy."""
         query = (query or "").strip()
         if not query:
             return None
 
+        self._rate_limit()
         try:
             resp = requests.get(
                 self.SEARCH_URL,

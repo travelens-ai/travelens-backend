@@ -11,6 +11,7 @@ def _get_db_config():
         "database": os.getenv("DB_NAME"),
         "ssl_disabled": os.getenv("DB_SSL_DISABLED", "true").lower() == "true",
         "connection_timeout": 10,
+        "use_pure": True,  # avoids C extension SSL race on macOS ARM64
     }
 
 _connection = None

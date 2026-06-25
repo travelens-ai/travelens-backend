@@ -12,11 +12,15 @@ from numpy.linalg import norm
 import schedule
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from integrations.generate_images import ImageGenerator
 from integrations.api_integrations import GooglePlacesClient, ImageSearchClient, NominatimClient
-from core.db import fetch_dicts, new_connection
+from core.db import fetch_dicts, new_connection, is_db_ready
 import os
 import random
+
+# PKL files live in the project root (one level above src/)
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 
 class ItenaryRecommendationSystem:
@@ -67,13 +71,13 @@ class ItenaryRecommendationSystem:
         """Schedule the set_similar_places function to run every 1 day"""
         try:
             # Load similar_places.csv into a DataFrame
-            similar_places_df = pd.read_csv('similar_places.csv')
+            similar_places_df = pd.read_csv(os.path.join(_PROJECT_ROOT, 'similar_places.csv'))
 
             final_places = {}
             for row in similar_places_df.itertuples(index=False):
                 final_places[row.placename] = row._asdict()      
             # Save the DataFrame to a pickle file
-            with open('similar_places.pkl', 'wb') as f:
+            with open(os.path.join(_PROJECT_ROOT, 'similar_places.pkl'), 'wb') as f:
                 pickle.dump(final_places, f)
 
             print("similar_places.pkl generated or updated successfully.")
@@ -106,14 +110,14 @@ class ItenaryRecommendationSystem:
             top_destinations = top_destinations.fillna('')
 
             # Remove previous data from the CSV file if it exists
-            with open('popular_destination.csv', 'w') as f:
+            with open(os.path.join(_PROJECT_ROOT, 'popular_destination.csv'), 'w') as f:
                 f.truncate(0)
 
             # Save the top destinations to a CSV file
-            top_destinations.to_csv('popular_destination.csv', index=False)
+            top_destinations.to_csv(os.path.join(_PROJECT_ROOT, 'popular_destination.csv'), index=False)
 
             # Save the preprocessed DataFrame to a pickle file
-            with open('popular_destination.pkl', 'wb') as f:
+            with open(os.path.join(_PROJECT_ROOT, 'popular_destination.pkl'), 'wb') as f:
                 pickle.dump(top_destinations, f)
 
             print("Popular destinations saved successfully.")
@@ -123,7 +127,7 @@ class ItenaryRecommendationSystem:
     def get_popular_destination(self):
         """Load the most popular top 10 destinations"""
         try:
-            with open('popular_destination.pkl', 'rb') as f:
+            with open(os.path.join(_PROJECT_ROOT, 'popular_destination.pkl'), 'rb') as f:
                 popular_destination = pickle.load(f)
             return popular_destination.to_dict(orient='records')
         except FileNotFoundError:
@@ -132,8 +136,8 @@ class ItenaryRecommendationSystem:
     
     def get_similar_places(self):
         try:
-            if os.path.exists('similar_places.pkl') and os.path.getsize('similar_places.pkl') > 0:
-                with open('similar_places.pkl', 'rb') as f:
+            if os.path.exists(os.path.join(_PROJECT_ROOT, 'similar_places.pkl')) and os.path.getsize(os.path.join(_PROJECT_ROOT, 'similar_places.pkl')) > 0:
+                with open(os.path.join(_PROJECT_ROOT, 'similar_places.pkl'), 'rb') as f:
                     similar_places = pickle.load(f)
                 return similar_places
             else:
@@ -212,7 +216,7 @@ class ItenaryRecommendationSystem:
             print("  places table empty — falling back to CSV.")
         except Exception as e:
             print(f"  DB read for places failed ({e}) — falling back to CSV.")
-        return pd.read_csv('indian_travel_places.csv')
+        return pd.read_csv(os.path.join(_PROJECT_ROOT, 'indian_travel_places.csv'))
 
     def _get_images_for_places(self, names):
         """Return {lowercased place name -> [image_name, ...]} for the given place
@@ -300,7 +304,7 @@ class ItenaryRecommendationSystem:
             print("  hotels table empty — falling back to CSV.")
         except Exception as e:
             print(f"  DB read for hotels failed ({e}) — falling back to CSV.")
-        return pd.read_csv('indian_hotels.csv')
+        return pd.read_csv(os.path.join(_PROJECT_ROOT, 'indian_hotels.csv'))
 
     def _load_restaurants_df(self):
         """Load restaurants from the DB, aliasing snake_case back to the
@@ -321,7 +325,7 @@ class ItenaryRecommendationSystem:
             print("  restaurants table empty — falling back to CSV.")
         except Exception as e:
             print(f"  DB read for restaurants failed ({e}) — falling back to CSV.")
-        return pd.read_csv('indian_restaurants.csv')
+        return pd.read_csv(os.path.join(_PROJECT_ROOT, 'indian_restaurants.csv'))
 
     def _load_data(self):
         """Load required datasets"""
@@ -340,9 +344,9 @@ class ItenaryRecommendationSystem:
             self.place_type_embeddings = {}
             try:
                 # Try to load existing embeddings
-                with open('activity_embeddings.pkl', 'rb') as f:
+                with open(os.path.join(_PROJECT_ROOT, 'activity_embeddings.pkl'), 'rb') as f:
                     self.activity_embeddings = pickle.load(f)
-                with open('place_type_embeddings.pkl', 'rb') as f:
+                with open(os.path.join(_PROJECT_ROOT, 'place_type_embeddings.pkl'), 'rb') as f:
                     self.place_type_embeddings = pickle.load(f)
                 print("Loaded existing embeddings from pickle files")
             except FileNotFoundError:
@@ -373,9 +377,9 @@ class ItenaryRecommendationSystem:
                         self.place_type_embeddings[text] = emb / norm(emb)
 
                 # Save embeddings to pickle files
-                with open('activity_embeddings.pkl', 'wb') as f:
+                with open(os.path.join(_PROJECT_ROOT, 'activity_embeddings.pkl'), 'wb') as f:
                     pickle.dump(self.activity_embeddings, f)
-                with open('place_type_embeddings.pkl', 'wb') as f:
+                with open(os.path.join(_PROJECT_ROOT, 'place_type_embeddings.pkl'), 'wb') as f:
                     pickle.dump(self.place_type_embeddings, f)
                 print("Generated and saved new embeddings")
 
@@ -407,11 +411,19 @@ class ItenaryRecommendationSystem:
             return activities[0]  # Handle single activity
         return ", ".join(activities[:-1]) + " and " + activities[-1]
 
+    _user_embedding_cache = {}  # keyed by (trip_type, sorted activities) — static per model deployment
+
     def _generate_user_embedding(self, user_preferences):
         """Generate user embedding based on user preferences"""
+        cache_key = (
+            user_preferences.get('trip_type', ''),
+            tuple(sorted(str(a) for a in user_preferences.get('preferred_activities', [])))
+        )
+        if cache_key in self._user_embedding_cache:
+            return self._user_embedding_cache[cache_key]
         query = 'The user prefers trips focused on ' + user_preferences['trip_type'] + '. They are also interested in activities such as ' + self.merge_list(user_preferences['preferred_activities']) + '.'
         user_activity_embedding = self._encode([query])[0]
-        # Implement user embedding generation logic here
+        self._user_embedding_cache[cache_key] = user_activity_embedding
         return user_activity_embedding
 
     def compute_activity_score(self, activity_dict, user_activity_embedding):
@@ -532,15 +544,17 @@ class ItenaryRecommendationSystem:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
 
-            # Get place recommendations
-            places = self._get_place_recommendations(user_preferences)
-            places = self._enrich_place_images(places)
+            # Fetch places, hotels, restaurants in parallel — they are independent
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                fut_places = ex.submit(self._get_place_recommendations, user_preferences)
+                fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
+                fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
+                places      = fut_places.result()
+                hotels      = fut_hotels.result()
+                restaurants = fut_rests.result()
 
-            # Get hotel recommendations
-            hotels = self._get_hotel_recommendations(user_preferences)
-
-            # Get restaurant recommendations
-            restaurants = self._get_restaurant_recommendations(user_preferences)
+            # Enrich images in background — benefits the next request; not needed for current response
+            threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
 
             # Generate detailed itinerary
             itinerary = self._generate_detailed_itinerary(
@@ -572,28 +586,31 @@ class ItenaryRecommendationSystem:
 
             yield {'event': 'progress', 'step': 'started', 'message': 'Starting your itinerary...'}
 
-            places = self._get_place_recommendations(user_preferences)
-            places = self._enrich_place_images(places)
+            # Fetch places, hotels, restaurants in parallel — they are independent
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                fut_places = ex.submit(self._get_place_recommendations, user_preferences)
+                fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
+                fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
+                places      = fut_places.result()
+                hotels      = fut_hotels.result()
+                restaurants = fut_rests.result()
+
+            # Enrich images in background — benefits the next request; not needed for current response
+            threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
             yield {'event': 'progress', 'step': 'places', 'message': 'Found places to visit'}
-
-            hotels = self._get_hotel_recommendations(user_preferences)
             yield {'event': 'progress', 'step': 'hotels', 'message': 'Picked hotels'}
-
-            restaurants = self._get_restaurant_recommendations(user_preferences)
             yield {'event': 'progress', 'step': 'restaurants', 'message': 'Picked restaurants'}
 
-            # Resolve the destination's title and image gallery up front (from
-            # the requested place) so they can be shown before the LLM plan is
-            # built. The final `complete` event still carries the authoritative
-            # values from the generated itinerary.
+            # Emit early info event so the client can show destination name immediately.
+            # Description is intentionally empty here — the complete event carries the
+            # authoritative description from the generated itinerary JSON.
             destination = str(user_preferences.get('places_of_interest', '')).strip()
             dest_city, dest_state = self._parse_city_state(destination)
             yield {'event': 'progress', 'step': 'info', 'message': 'Preparing your trip details...'}
-            dest_description = self._generate_destination_description(destination)
             yield {
                 'event': 'info',
                 'name': destination,
-                'description': dest_description,
+                'description': '',
                 'city': dest_city or destination,
                 'state': dest_state or '',
                 'price_estimated_range': '',
@@ -646,13 +663,20 @@ class ItenaryRecommendationSystem:
                 if name and name not in place_names:
                     place_names.append(name)
 
-            places = self._get_place_recommendations(user_preferences)
-            places = self._enrich_place_images(places)
-            hotels = self._get_hotel_recommendations(user_preferences)
-            restaurants = self._get_restaurant_recommendations(user_preferences)
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                fut_places = ex.submit(self._get_place_recommendations, user_preferences)
+                fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
+                fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
+                places      = fut_places.result()
+                hotels      = fut_hotels.result()
+                restaurants = fut_rests.result()
+            threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
 
+            places_trimmed = self._trim_for_prompt(places, self._PLACE_COLS_PROMPT, 60)
+            hotels_trimmed = self._trim_for_prompt(hotels, self._HOTEL_COLS_PROMPT, 60)
+            rests_trimmed  = self._trim_for_prompt(restaurants, self._REST_COLS_PROMPT, 60)
             prompt = self.generate_edit_itinerary_prompt(
-                user_preferences, places, restaurants, hotels, place_names
+                user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names
             )
             print(f"Edit prompt length: {len(prompt)} chars")
 
@@ -703,7 +727,7 @@ class ItenaryRecommendationSystem:
 
             print("placenameplacename",placename,place_image_map)
            
-            with open('similar_places.pkl', 'rb') as f:
+            with open(os.path.join(_PROJECT_ROOT, 'similar_places.pkl'), 'rb') as f:
                 similar_places_data = pickle.load(f)
             if placename not in place_image_map and placename in similar_places_data:
                 place_image_map[placename] = similar_places_data.get(placename).get('image')
@@ -819,12 +843,29 @@ class ItenaryRecommendationSystem:
                 'message': str(e)
             }
 
+    # Circuit-breaker: skip DB lat/lon lookups for 30s after a connection failure
+    # so a single timeout doesn't cascade into 25× 10s stalls per request.
+    _db_lat_long_dead_until = 0.0
+    _db_lat_long_dead_lock = None
+
     def _db_lat_long(self, table, name):
         """Look up lat/lon/full_address for a row by name in
         places/hotels/restaurants. Returns a dict only when lat & lon are both
-        present, else None."""
+        present, else None. Short-circuits for 30s after a connection failure."""
+        import time as _time
         if not name:
             return None
+        if not is_db_ready():
+            return None
+
+        if ItenaryRecommendationSystem._db_lat_long_dead_lock is None:
+            import threading
+            ItenaryRecommendationSystem._db_lat_long_dead_lock = threading.Lock()
+
+        with ItenaryRecommendationSystem._db_lat_long_dead_lock:
+            if _time.monotonic() < ItenaryRecommendationSystem._db_lat_long_dead_until:
+                return None
+
         name_col = "property_name" if table == "hotels" else "name"
         try:
             rows = fetch_dicts(
@@ -835,6 +876,8 @@ class ItenaryRecommendationSystem:
             )
         except Exception as e:
             print(f"  _db_lat_long failed for {name!r} in {table} ({e})")
+            with ItenaryRecommendationSystem._db_lat_long_dead_lock:
+                ItenaryRecommendationSystem._db_lat_long_dead_until = _time.monotonic() + 30.0
             return None
         if rows:
             return {
@@ -866,38 +909,33 @@ class ItenaryRecommendationSystem:
             print(f"  _save_lat_long_to_db failed for {name!r} in {table} ({e})")
 
     def _resolve_lat_long(self, table, name, location_hint=""):
-        """Resolve lat/lon/full_address for an entity: prefer the DB value, fall
-        back to OpenStreetMap Nominatim. On a successful geocode, persist the
-        result back to the DB. Returns a dict {'lat','lon','full_address'} or
-        None. Tries multiple query variants to improve Nominatim hit rate."""
+        """Resolve lat/lon/full_address for an entity. DB-first; Nominatim
+        fallback is disabled while the cron backfill (update_places_lat_lon.py)
+        is running — once the DB is fully populated, re-enable the block below."""
         coords = self._db_lat_long(table, name)
         if coords is not None:
             return coords
 
-        # Build a list of query variants from most specific to least specific.
-        # Nominatim sometimes fails on very long or unusual names but succeeds
-        # with a shorter name + city hint.
-        name_str = str(name or "").strip()
-        hint = location_hint.strip().strip(",") if location_hint else ""
-        queries = []
-        if hint:
-            queries.append(f"{name_str}, {hint}")   # full name + city/state
-        queries.append(name_str)                     # name only as last resort
+        # --- Nominatim fallback (disabled: re-enable once DB backfill is complete) ---
+        # name_str = str(name or "").strip()
+        # hint = location_hint.strip().strip(",") if location_hint else ""
+        # queries = []
+        # if hint:
+        #     queries.append(f"{name_str}, {hint}")
+        # queries.append(name_str)
+        # result = None
+        # for q in queries:
+        #     result = self.geocoder.geocode(q)
+        #     if result is not None:
+        #         break
+        # if result is not None:
+        #     self._save_lat_long_to_db(
+        #         table, name, result["lat"], result["lon"], result.get("full_address", "")
+        #     )
+        #     return result
+        # --- end Nominatim fallback ---
 
-        result = None
-        for q in queries:
-            result = self.geocoder.geocode(q)
-            if result is not None:
-                break
-
-        if result is None:
-            return None
-
-        # Persist back to the DB so future itineraries skip the API.
-        self._save_lat_long_to_db(
-            table, name, result["lat"], result["lon"], result.get("full_address", "")
-        )
-        return result
+        return None
 
     def _attach_db_fields(self, itinerary):
         """Override LLM-generated opening_hours/website_uri/phone_number with
@@ -961,7 +999,8 @@ class ItenaryRecommendationSystem:
         """Attach per-place weather to every place_to_visit using its lat/lon.
         Also sets a representative day-level weather summary on each day object.
         Requires _attach_lat_long to have already run. Silently skips places
-        without coordinates. Uses the 2-hour in-memory cache in weather service."""
+        without coordinates. Uses the 2-hour in-memory cache in weather service.
+        All weather fetches are parallelized via ThreadPoolExecutor."""
         from datetime import datetime, timedelta
         from features.weather.service import get_weather_by_coords
 
@@ -970,26 +1009,43 @@ class ItenaryRecommendationSystem:
         except ValueError:
             return
 
+        # Collect all tasks: (place_obj, day_index, day_date_str)
+        tasks = []
         for i, day in enumerate(itinerary.get('itinerary', [])):
             day_date = (trip_start + timedelta(days=i)).strftime("%Y-%m-%d")
-            day_weather = None
-
             for place in day.get('places_to_visit', []):
-                lat = place.get('lat')
-                lon = place.get('lon')
-                if lat is None or lon is None:
-                    place['weather'] = None
-                    continue
-                result, err = get_weather_by_coords(float(lat), float(lon), day_date, days=1)
-                if result and result.get('weather'):
-                    weather_entry = result['weather'][0]
-                    place['weather'] = weather_entry
-                    if day_weather is None:
-                        day_weather = weather_entry
-                else:
-                    place['weather'] = None
+                tasks.append((place, i, day_date))
 
-            day['weather'] = day_weather
+        if not tasks:
+            return
+
+        def _fetch_weather(task):
+            place, day_idx, day_date = task
+            lat = place.get('lat')
+            lon = place.get('lon')
+            if lat is None or lon is None:
+                return None, day_idx
+            try:
+                result, _ = get_weather_by_coords(float(lat), float(lon), day_date, days=1)
+                return result, day_idx
+            except Exception:
+                return None, day_idx
+
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            weather_results = list(ex.map(_fetch_weather, tasks))
+
+        day_weather = {}
+        for (place, day_idx, _), (result, _) in zip(tasks, weather_results):
+            if result and result.get('weather'):
+                entry = result['weather'][0]
+                place['weather'] = entry
+                if day_idx not in day_weather:
+                    day_weather[day_idx] = entry
+            else:
+                place['weather'] = None
+
+        for i, day in enumerate(itinerary.get('itinerary', [])):
+            day['weather'] = day_weather.get(i)
 
     def _get_place_recommendations(self, user_preferences):
         """Get recommended places based on user preferences"""
@@ -1027,13 +1083,13 @@ class ItenaryRecommendationSystem:
 
         if not city_matches.empty:
             # If there are city matches, use them only
-            top_places = city_matches
+            top_places = city_matches.copy()
         else:
             # Otherwise fall back to matching by state
             top_places = top_places[
                 top_places['state'].str.lower().apply(
                     lambda state: any(part in str(state).lower() for part in location_parts) )
-            ]
+            ].copy()
 
         # Calculate average rating for all restaurants (or set a constant)
         C = top_places['rating'].mean()
@@ -1149,16 +1205,25 @@ class ItenaryRecommendationSystem:
             print(f"  _generate_destination_description failed for {destination!r}: {e}")
             return ""
 
+    _PLACE_COLS_PROMPT = ['name', 'city', 'type', 'rating', 'famous activities', 'best month to visit']
+    _HOTEL_COLS_PROMPT = ['property_name', 'city', 'hotel_star_rating', 'site_review_rating', 'property_type']
+    _REST_COLS_PROMPT  = ['Name', 'City', 'Cuisine', 'Rating', 'Cost', 'Locality']
+
+    def _trim_for_prompt(self, df, cols, n):
+        available = [c for c in cols if c in df.columns]
+        return df[available].head(n)
+
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
-        prompt = self.generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels)
+        places_trimmed = self._trim_for_prompt(top_places, self._PLACE_COLS_PROMPT, 30)
+        hotels_trimmed = self._trim_for_prompt(top_hotels, self._HOTEL_COLS_PROMPT, 30)
+        rests_trimmed  = self._trim_for_prompt(top_restaurants, self._REST_COLS_PROMPT, 30)
+        prompt = self.generate_travel_itinerary_prompt(user_preferences, places_trimmed, rests_trimmed, hotels_trimmed)
         print(f"Prompt length: {len(prompt)} chars")
 
         response = self.client.responses.create(
             model=self.chat_deployment,
             input=[{"role": "user", "content": prompt}],
         )
-        print(f"response:", response)
-
         response_text = response.output_text
         if response_text.startswith("```json"):
             response_text = response_text[7:]

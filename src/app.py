@@ -90,6 +90,9 @@ else:
                        "cron", hour=3, minute=0, id="google_ratings")
     _scheduler.add_job(lambda: _run("fill_missing_images.py", ["--limit", "100"]),
                        "cron", hour="1,7,13,19", minute=30, id="image_fill")
+    # Pre-warm Google Places SQLite cache for top-10 popular cities after a fresh deploy
+    _scheduler.add_job(lambda: _run("warm_places_cache.py"),
+                       "cron", hour=2, minute=30, id="warm_places_cache")
 
 _scheduler.start()
 

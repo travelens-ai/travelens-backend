@@ -1,8 +1,10 @@
 from datetime import date, datetime, timedelta
+import threading
 
 import requests as http_requests
 
 _weather_cache = {}
+_weather_cache_lock = threading.Lock()
 CACHE_TTL = 7200  # 2 hours
 
 # WMO weather code → (label, emoji)
@@ -41,18 +43,21 @@ def _get_coords(city):
 
 
 def _cache_get(key):
-    entry = _weather_cache.get(key)
+    with _weather_cache_lock:
+        entry = _weather_cache.get(key)
     if not entry:
         return None
     ts, result = entry
     if (datetime.now().timestamp() - ts) < CACHE_TTL:
         return result
-    del _weather_cache[key]
+    with _weather_cache_lock:
+        _weather_cache.pop(key, None)
     return None
 
 
 def _cache_set(key, result):
-    _weather_cache[key] = (datetime.now().timestamp(), result)
+    with _weather_cache_lock:
+        _weather_cache[key] = (datetime.now().timestamp(), result)
 
 
 def _fetch_forecast(lat, lon, start_date, end_date):
