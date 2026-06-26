@@ -193,30 +193,42 @@ def upload_to_cdn(filepath: str) -> str:
     return ""
 
 
-def link_place_image(cursor, conn, place_id: int, image_name: str):
-    """Insert image_name into `images`, link to place via `place_image_map`."""
-    # Upsert image row and retrieve its id
-    cursor.execute(
-        """
-        MERGE images AS tgt
-        USING (SELECT ? AS image_name) AS src ON tgt.image_name = src.image_name
-        WHEN NOT MATCHED THEN INSERT (image_name) VALUES (src.image_name);
-        """,
-        (image_name,),
-    )
-    cursor.execute("SELECT id FROM images WHERE image_name = ?", (image_name,))
-    row = cursor.fetchone()
-    image_id = row[0] if row else None
-    if image_id is None:
-        return
-    cursor.execute(
-        """
-        IF NOT EXISTS (SELECT 1 FROM place_image_map WHERE place_id = ? AND image_id = ?)
-            INSERT INTO place_image_map (place_id, image_id) VALUES (?, ?)
-        """,
-        (place_id, image_id, place_id, image_id),
-    )
-    conn.commit()
+def link_place_image(cursor, conn, place_id: int, image_name: str) -> bool:
+    """Insert image_name into `images`, link to place via `place_image_map`. Returns True on success."""
+    try:
+        cursor.execute(
+            """
+            MERGE images AS tgt
+            USING (SELECT ? AS image_name) AS src ON tgt.image_name = src.image_name
+            WHEN NOT MATCHED THEN INSERT (id, image_name)
+                VALUES ((SELECT ISNULL(MAX(id), 0) + 1 FROM images), src.image_name);
+            """,
+            (image_name,),
+        )
+        read_cur = conn.cursor()
+        read_cur.execute("SELECT id FROM images WHERE image_name = ?", (image_name,))
+        row = read_cur.fetchone()
+        read_cur.close()
+        image_id = row[0] if row else None
+        if image_id is None:
+            print(f"  [DB] could not get id for {image_name}")
+            return False
+        cursor.execute(
+            """
+            IF NOT EXISTS (SELECT 1 FROM place_image_map WHERE place_id = ? AND image_id = ?)
+                INSERT INTO place_image_map (place_id, image_id) VALUES (?, ?)
+            """,
+            (place_id, image_id, place_id, image_id),
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"  [DB] error writing {image_name}: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
 
 
 def main(limit=None):
@@ -278,7 +290,9 @@ def main(limit=None):
                 print(f"  [{idx}/5] CDN upload failed.")
                 continue
 
-            link_place_image(write_cursor, conn, row["id"], cdn_name)
+            if not link_place_image(write_cursor, conn, row["id"], cdn_name):
+                print(f"  [{idx}/5] DB write failed for {cdn_name} (file is on CDN).")
+                continue
             size_kb = os.path.getsize(filepath) / 1024
             print(f"  [{idx}/5] {cdn_name} ({size_kb:.0f} KB)")
             uploaded += 1
