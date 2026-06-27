@@ -67,8 +67,12 @@ _WIKIMEDIA_HEADERS = {
 }
 
 
-def fetch_wikimedia_urls(query: str, count: int) -> list:
-    """Return up to `count` valid landscape JPG candidates from Wikimedia Commons."""
+def fetch_wikimedia_urls(query: str, count: int, offset: int = 0) -> list:
+    """Return up to `count` (url, 'wikimedia') tuples from Wikimedia Commons.
+
+    offset skips the first N valid results so re-runs don't repeat already-used images.
+    e.g. offset=1 means skip the top result (already used for _1.webp) and return the next N.
+    """
     try:
         resp = requests.get(
             WIKIMEDIA_URL,
@@ -78,7 +82,7 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
                 "generator": "search",
                 "gsrsearch": query,
                 "gsrnamespace": 6,
-                "gsrlimit": count * 3,
+                "gsrlimit": (offset + count) * 3,
                 "prop": "imageinfo",
                 "iiprop": "url|size|mime|thumburl",
                 "iiurlwidth": 1200,
@@ -89,39 +93,45 @@ def fetch_wikimedia_urls(query: str, count: int) -> list:
         resp.raise_for_status()
         pages = resp.json().get("query", {}).get("pages", {})
         candidates = sorted(pages.values(), key=lambda x: x.get("index", 99))
-        urls = []
+        print(f"  [Wikimedia] {len(candidates)} candidates for '{query}' (need {count}, offset={offset})")
+        valid = []
         for page in candidates:
-            if len(urls) >= count:
-                break
             ii = page.get("imageinfo", [{}])[0]
             mime = ii.get("mime", "")
             w = ii.get("width", 0)
             h = ii.get("height", 0)
-            title = page.get("title", "").lower()
+            title = page.get("title", "")
+            title_lower = title.lower()
             if mime != "image/jpeg":
+                print(f"    skip [{title}] mime={mime}")
                 continue
             if w <= h:
+                print(f"    skip [{title}] not landscape ({w}x{h})")
                 continue
-            if any(word in title for word in _SKIP_WORDS):
+            skip_word = next((s for s in _SKIP_WORDS if s in title_lower), None)
+            if skip_word:
+                print(f"    skip [{title}] contains '{skip_word}'")
                 continue
-            # prefer the scaled thumbnail URL — datacenter IPs get 429 on raw originals
             url = ii.get("thumburl") or ii.get("url", "")
             if url:
-                urls.append(url)
-        return urls
+                print(f"    ok   [{title}] {w}x{h}")
+                valid.append((url, "wikimedia"))
+        print(f"  [Wikimedia] {len(valid)} valid, returning [{offset}:{offset+count}] = {len(valid[offset:offset+count])}")
+        return valid[offset: offset + count]
     except Exception as e:
         print(f"  [Wikimedia] error: {e}")
     return []
 
 
-def fetch_image_urls(query: str, count: int = 2) -> list:
-    """Collect up to `count` image URLs from Wikimedia → Pexels → Unsplash."""
-    urls = []
+def fetch_image_urls(query: str, count: int = 2, offset: int = 0) -> list:
+    """Collect up to `count` (url, source) tuples from Wikimedia → Pexels → Unsplash."""
+    results = []
 
-    urls.extend(fetch_wikimedia_urls(query, count))
+    results.extend(fetch_wikimedia_urls(query, count, offset=offset))
 
-    if len(urls) < count and PEXELS_KEY:
-        needed = count - len(urls)
+    if len(results) < count and PEXELS_KEY:
+        needed = count - len(results)
+        existing_urls = {u for u, _ in results}
         try:
             resp = requests.get(
                 PEXELS_URL,
@@ -132,13 +142,15 @@ def fetch_image_urls(query: str, count: int = 2) -> list:
             resp.raise_for_status()
             for photo in resp.json().get("photos", []):
                 url = photo.get("src", {}).get("large", "")
-                if url and url not in urls:
-                    urls.append(url)
+                if url and url not in existing_urls:
+                    results.append((url, "pexels"))
+                    existing_urls.add(url)
         except Exception as e:
             print(f"  [Pexels] error: {e}")
 
-    if len(urls) < count and UNSPLASH_KEY:
-        needed = count - len(urls)
+    if len(results) < count and UNSPLASH_KEY:
+        needed = count - len(results)
+        existing_urls = {u for u, _ in results}
         try:
             resp = requests.get(
                 UNSPLASH_URL,
@@ -149,12 +161,13 @@ def fetch_image_urls(query: str, count: int = 2) -> list:
             resp.raise_for_status()
             for result in resp.json().get("results", []):
                 url = result.get("urls", {}).get("regular", "")
-                if url and url not in urls:
-                    urls.append(url)
+                if url and url not in existing_urls:
+                    results.append((url, "unsplash"))
+                    existing_urls.add(url)
         except Exception as e:
             print(f"  [Unsplash] error: {e}")
 
-    return urls[:count]
+    return results[:count]
 
 
 def download_as_webp(url: str, filename: str) -> bool:
@@ -193,17 +206,17 @@ def upload_to_cdn(filepath: str) -> str:
     return ""
 
 
-def link_place_image(cursor, conn, place_id: int, image_name: str) -> bool:
+def link_place_image(cursor, conn, place_id: int, image_name: str, source: str = None) -> bool:
     """Insert image_name into `images`, link to place via `place_image_map`. Returns True on success."""
     try:
         cursor.execute(
             """
             MERGE images AS tgt
             USING (SELECT ? AS image_name) AS src ON tgt.image_name = src.image_name
-            WHEN NOT MATCHED THEN INSERT (id, image_name)
-                VALUES ((SELECT ISNULL(MAX(id), 0) + 1 FROM images), src.image_name);
+            WHEN NOT MATCHED THEN INSERT (id, image_name, source)
+                VALUES ((SELECT ISNULL(MAX(id), 0) + 1 FROM images), src.image_name, ?);
             """,
-            (image_name,),
+            (image_name, source),
         )
         read_cur = conn.cursor()
         read_cur.execute("SELECT id FROM images WHERE image_name = ?", (image_name,))
@@ -232,6 +245,7 @@ def link_place_image(cursor, conn, place_id: int, image_name: str) -> bool:
 
 
 def main(limit=None):
+    TARGET = 5
     conn = _connect()
     read_cursor = conn.cursor()
     write_cursor = conn.cursor()
@@ -244,14 +258,15 @@ def main(limit=None):
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
         "GROUP BY p.id, p.name, c.name, s.name, p.type "
-        "HAVING COUNT(pim.image_id) < 2"
+        "HAVING COUNT(pim.image_id) < 5 "
+        "ORDER BY COUNT(pim.image_id) ASC"
     )
     cols = [col[0] for col in read_cursor.description]
     rows = [dict(zip(cols, row)) for row in read_cursor.fetchall()]
     if limit:
         rows = rows[:limit]
     total = len(rows)
-    print(f"Processing {total} places with 0 or 1 images.\n")
+    print(f"Processing {total} places with fewer than {TARGET} images.\n")
 
     done = 0
     failed = 0
@@ -262,39 +277,43 @@ def main(limit=None):
         state = (row["state"] or "").title()
         place_type = (row["type"] or "").title()
         img_count = row.get("img_count", 0)
-        needed = 2 - img_count
+        needed = TARGET - img_count
+        # offset = how many top Wikimedia results to skip.
+        # 0 or 1 image: take from the top (offset 0).
+        # 2+ images: skip the results already used in prior runs (offset = img_count - 1).
+        offset = max(0, img_count - 1)
 
         query = f"{name} {place_type} {city} India".strip()
         base_filename = re.sub(r"[^\w\-]", "_", "_".join(p for p in [name, city, state] if p).replace(" ", "_"))
 
-        print(f"[{i}/{total}] {name} ({city}) [{place_type}] (has {img_count}, fetching {needed} more)")
+        print(f"[{i}/{total}] {name} ({city}) [{place_type}] (has {img_count}, fetching {needed} more, offset={offset})")
 
-        urls = fetch_image_urls(query, count=needed)
-        if not urls:
+        url_tuples = fetch_image_urls(query, count=needed, offset=offset)
+        if not url_tuples:
             print(f"  no images found.")
             failed += 1
             continue
 
         uploaded = 0
-        for idx, url in enumerate(urls, img_count + 1):
+        for idx, (url, source) in enumerate(url_tuples, img_count + 1):
             filename = f"{base_filename}_{idx}.webp"
             filepath = os.path.join(OUTPUT_DIR, filename)
 
             if not os.path.exists(filepath):
                 if not download_as_webp(url, filename):
-                    print(f"  [{idx}/5] download failed.")
+                    print(f"  [{idx}/{TARGET}] download failed.")
                     continue
 
             cdn_name = upload_to_cdn(filepath)
             if not cdn_name:
-                print(f"  [{idx}/5] CDN upload failed.")
+                print(f"  [{idx}/{TARGET}] CDN upload failed.")
                 continue
 
-            if not link_place_image(write_cursor, conn, row["id"], cdn_name):
-                print(f"  [{idx}/5] DB write failed for {cdn_name} (file is on CDN).")
+            if not link_place_image(write_cursor, conn, row["id"], cdn_name, source):
+                print(f"  [{idx}/{TARGET}] DB write failed for {cdn_name} (file is on CDN).")
                 continue
             size_kb = os.path.getsize(filepath) / 1024
-            print(f"  [{idx}/5] {cdn_name} ({size_kb:.0f} KB)")
+            print(f"  [{idx}/{TARGET}] {cdn_name} ({size_kb:.0f} KB) [{source}]")
             uploaded += 1
 
         if uploaded > 0:
