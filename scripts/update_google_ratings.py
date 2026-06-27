@@ -57,7 +57,7 @@ def get_places(cursor, batch: int, force_refresh: bool) -> list:
     if force_refresh:
         cursor.execute(
             """
-            SELECT TOP (?) p.id, p.name, c.name AS city
+            SELECT TOP (?) p.id, p.name, c.name AS city, p.google_place_id
             FROM places p
             JOIN cities c ON p.city_id = c.id
             """,
@@ -66,7 +66,7 @@ def get_places(cursor, batch: int, force_refresh: bool) -> list:
     else:
         cursor.execute(
             """
-            SELECT TOP (?) p.id, p.name, c.name AS city
+            SELECT TOP (?) p.id, p.name, c.name AS city, p.google_place_id
             FROM places p
             JOIN cities c ON p.city_id = c.id
             WHERE p.google_place_id IS NULL
@@ -100,7 +100,7 @@ def main():
         name = place["name"]
         city = place["city"] or ""
 
-        result = client.resolve_place(name, city)
+        result = client.resolve_place(name, city, known_place_id=place.get("google_place_id"))
 
         if result is None:
             print(f"  SKIP  [{place_id}] {name}, {city} — no Google result")
@@ -119,12 +119,18 @@ def main():
                 for c in s
             )
 
+        photo_refs = result.get("google_photo_refs")
+        reviews = result.get("google_reviews")
+
         tag = "DRY " if args.dry_run else ""
         print(f"  {tag}UPDATE [{place_id}] {name}, {city}")
         print(f"    rating={result['google_rating']}  count={result['google_rating_count']}")
-        print(f"    phone={result.get('phone_number') or '-'}  website={result.get('website_uri') or '-'}")
+        print(f"    phone={result.get('phone_number') or '-'}  intl={result.get('international_phone_number') or '-'}")
+        print(f"    website={result.get('website_uri') or '-'}")
         print(f"    types={result.get('place_types') or '-'}  status={result.get('business_status') or '-'}")
+        print(f"    short_address={result.get('short_formatted_address') or '-'}")
         print(f"    lat={result.get('lat')}  lon={result.get('lon')}")
+        print(f"    photos={len(photo_refs) if photo_refs else 0} refs  reviews={len(reviews) if reviews else 0}")
         if oh:
             print("    hours:")
             for line in oh:
@@ -136,22 +142,23 @@ def main():
             cursor.execute(
                 """
                 UPDATE places
-                SET google_place_id     = ?,
-                    google_rating       = ?,
-                    google_rating_count = ?,
-                    google_maps_uri     = ?,
-                    google_synced_at    = GETDATE(),
-                    lat                 = COALESCE(lat, ?),
-                    lon                 = COALESCE(lon, ?),
-                    website_uri         = ?,
-                    phone_number        = ?,
-                    opening_hours       = ?,
-                    place_types         = ?,
-                    business_status     = ?,
-                    price_level         = ?,
-                    price_range         = ?,
-                    timezone            = ?,
-                    accessibility       = ?
+                SET google_place_id            = ?,
+                    google_rating              = ?,
+                    google_rating_count        = ?,
+                    google_maps_uri            = ?,
+                    google_synced_at           = GETDATE(),
+                    lat                        = COALESCE(lat, ?),
+                    lon                        = COALESCE(lon, ?),
+                    website_uri                = ?,
+                    phone_number               = ?,
+                    international_phone_number = ?,
+                    opening_hours              = ?,
+                    place_types                = ?,
+                    business_status            = ?,
+                    price_level                = ?,
+                    short_formatted_address    = ?,
+                    google_photo_refs          = ?,
+                    google_reviews             = ?
                 WHERE id = ?
                 """,
                 (
@@ -163,13 +170,14 @@ def main():
                     result.get("lon"),
                     result.get("website_uri"),
                     result.get("phone_number"),
+                    result.get("international_phone_number"),
                     _json.dumps(oh) if oh else None,
                     result.get("place_types"),
                     result.get("business_status"),
                     result.get("price_level"),
-                    result.get("price_range"),
-                    result.get("timezone"),
-                    _json.dumps(acc) if acc else None,
+                    result.get("short_formatted_address"),
+                    _json.dumps(photo_refs) if photo_refs else None,
+                    _json.dumps(reviews) if reviews else None,
                     place_id,
                 ),
             )

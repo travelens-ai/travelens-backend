@@ -12,16 +12,19 @@ DB_PATH = os.path.join("cache", "travelens_cache.db")
 DAILY_QUOTA_LIMIT = 300  # hard cap — well within the 1,000/day free tier
 IMAGES_TTL = 7 * 24 * 3600  # 7 days
 
-# Enterprise SKU (rating/userRatingCount/priceLevel already triggered it).
-# All Pro + Enterprise fields below cost nothing extra — same billing tier.
-# Do NOT add places.photos — that triggers a separate Photos API charge.
-_FIELD_MASK = (
-    "places.id,places.displayName,places.formattedAddress,"
-    "places.location,places.types,places.primaryType,"
-    "places.businessStatus,places.googleMapsUri,"
-    "places.accessibilityOptions,places.timeZone,places.utcOffsetMinutes,"
-    "places.rating,places.userRatingCount,places.priceLevel,places.priceRange,"
-    "places.regularOpeningHours,places.websiteUri,places.nationalPhoneNumber"
+# Call 1 — Text Search, IDs Only SKU ($0.00 free).
+# ONLY these two fields — adding anything else triggers a paid tier.
+_FIELD_MASK_SEARCH = "places.id,places.name"
+
+# Call 2 — Place Details, Pro SKU (~$0.017/place).
+# Maximum fields extractable at Pro tier without bumping to Enterprise ($0.025).
+# DO NOT add: editorialSummary, currentOpeningHours, dineIn, takeout, delivery,
+# reservable, accessibilityOptions, parkingOptions, paymentOptions, goodForChildren.
+_FIELD_MASK_DETAILS = (
+    "id,displayName,location,formattedAddress,shortFormattedAddress,"
+    "addressComponents,types,primaryType,businessStatus,rating,userRatingCount,"
+    "reviews,photos,websiteUri,nationalPhoneNumber,internationalPhoneNumber,"
+    "regularOpeningHours,priceLevel,googleMapsUri"
 )
 
 PRICE_LEVEL_MAP = {
@@ -223,26 +226,121 @@ def _quota_check_and_increment():
 # ---------------------------------------------------------------------------
 
 class GooglePlacesClient:
-    NEW_PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
+    NEW_PLACES_URL   = "https://places.googleapis.com/v1/places:searchText"
+    PLACE_DETAILS_URL = "https://places.googleapis.com/v1/"
 
     def __init__(self):
         self.api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
 
-    def _fetch(self, query):
+    def resolve_place_id(self, name: str, city: str) -> str | None:
+        """Step 1 — Text Search, IDs Only SKU. Cost: $0.00.
+        Returns the resource name (e.g. 'places/ChIJ...') for use in fetch_place_details().
+        Does NOT count against the paid quota."""
         if not self.api_key:
-            return []
-
-        allowed, count = _quota_check_and_increment()
-        if not allowed:
-            return []
-
+            return None
         try:
             resp = requests.post(
                 self.NEW_PLACES_URL,
                 headers={
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": self.api_key,
-                    "X-Goog-FieldMask": _FIELD_MASK,
+                    "X-Goog-FieldMask": _FIELD_MASK_SEARCH,
+                },
+                json={"textQuery": f"{name} {city} India", "maxResultCount": 1},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            places = resp.json().get("places", [])
+            return places[0].get("name") if places else None
+        except Exception as e:
+            print(f"[GooglePlacesClient] resolve_place_id error: {e}")
+            return None
+
+    def fetch_place_details(self, resource_name: str) -> dict | None:
+        """Step 2 — Place Details, Pro SKU. Cost: ~$0.017/place.
+        resource_name is the full path e.g. 'places/ChIJ...' from resolve_place_id()."""
+        if not self.api_key:
+            return None
+
+        allowed, count = _quota_check_and_increment()
+        if not allowed:
+            return None
+
+        try:
+            resp = requests.get(
+                self.PLACE_DETAILS_URL + resource_name,
+                headers={
+                    "X-Goog-Api-Key": self.api_key,
+                    "X-Goog-FieldMask": _FIELD_MASK_DETAILS,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            r = resp.json()
+            print(f"[GooglePlacesClient] quota: {count}/{DAILY_QUOTA_LIMIT} used today")
+
+            loc = r.get("location") or {}
+            hours = (r.get("regularOpeningHours") or {}).get("weekdayDescriptions")
+            types = r.get("types") or []
+            photos = [p.get("name") for p in r.get("photos", [])[:5] if p.get("name")]
+            reviews = [
+                {
+                    "rating": rv.get("rating"),
+                    "text": (rv.get("text") or {}).get("text", ""),
+                    "author": (rv.get("authorAttribution") or {}).get("displayName", ""),
+                }
+                for rv in r.get("reviews", [])[:5]
+            ]
+            return {
+                "google_place_id":            r.get("id"),
+                "google_rating":              r.get("rating"),
+                "google_rating_count":        r.get("userRatingCount"),
+                "google_maps_uri":            r.get("googleMapsUri"),
+                "lat":                        loc.get("latitude"),
+                "lon":                        loc.get("longitude"),
+                "website_uri":                r.get("websiteUri"),
+                "phone_number":               r.get("nationalPhoneNumber"),
+                "international_phone_number": r.get("internationalPhoneNumber"),
+                "opening_hours":              hours,
+                "place_types":                ", ".join(types[:3]) if types else None,
+                "business_status":            r.get("businessStatus"),
+                "price_level":                r.get("priceLevel"),
+                "short_formatted_address":    r.get("shortFormattedAddress"),
+                "google_photo_refs":          photos if photos else None,
+                "google_reviews":             reviews if reviews else None,
+            }
+        except Exception as e:
+            print(f"[GooglePlacesClient] fetch_place_details error: {e}")
+            return None
+
+    def resolve_place(self, name: str, city: str, known_place_id: str = None) -> dict | None:
+        """Resolve a place using 2-step process:
+        Step 1 (free): Text Search → get resource name (skipped if known_place_id supplied).
+        Step 2 ($0.017): Place Details → get all Pro-tier fields."""
+        resource_name = known_place_id or self.resolve_place_id(name, city)
+        if not resource_name:
+            return None
+        return self.fetch_place_details(resource_name)
+
+    def _fetch(self, query):
+        """Legacy internal fetch for hotels/restaurants search. Uses search field mask."""
+        if not self.api_key:
+            return []
+        allowed, count = _quota_check_and_increment()
+        if not allowed:
+            return []
+        try:
+            resp = requests.post(
+                self.NEW_PLACES_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": self.api_key,
+                    "X-Goog-FieldMask": (
+                        "places.id,places.displayName,places.formattedAddress,"
+                        "places.location,places.types,places.businessStatus,"
+                        "places.googleMapsUri,places.rating,places.priceLevel,"
+                        "places.websiteUri,places.nationalPhoneNumber"
+                    ),
                 },
                 json={"textQuery": query, "maxResultCount": 20},
                 timeout=10,
@@ -254,40 +352,6 @@ class GooglePlacesClient:
         except Exception as e:
             print(f"[GooglePlacesClient] fetch error: {e}")
             return []
-
-    def resolve_place(self, name: str, city: str) -> dict | None:
-        """Resolve a place to all available Google Places fields.
-        Enterprise SKU already triggered — no extra cost for Pro/Enterprise fields."""
-        results = self._fetch(f"{name} {city} India")
-        if not results:
-            return None
-        r = results[0]
-        loc = r.get("location") or {}
-        hours = r.get("regularOpeningHours", {}).get("weekdayDescriptions")
-        pr = r.get("priceRange") or {}
-        start = str(pr.get("startPrice", {}).get("units", "")).strip()
-        end = str(pr.get("endPrice", {}).get("units", "")).strip()
-        price_range_str = f"{start}–{end}".strip("–") or None
-        tz = r.get("timeZone") or {}
-        acc = r.get("accessibilityOptions") or {}
-        types = r.get("types") or []
-        return {
-            "google_place_id":     r.get("id"),
-            "google_rating":       r.get("rating"),
-            "google_rating_count": r.get("userRatingCount"),
-            "google_maps_uri":     r.get("googleMapsUri"),
-            "lat":                 loc.get("latitude"),
-            "lon":                 loc.get("longitude"),
-            "website_uri":         r.get("websiteUri"),
-            "phone_number":        r.get("nationalPhoneNumber"),
-            "opening_hours":       hours,
-            "place_types":         ", ".join(types[:3]) if types else None,
-            "business_status":     r.get("businessStatus"),
-            "price_level":         r.get("priceLevel"),
-            "price_range":         price_range_str,
-            "timezone":            tz.get("id"),
-            "accessibility":       acc if acc else None,
-        }
 
     def search_hotels(self, city: str) -> list:
         cached = _db_hotels_get(city)
