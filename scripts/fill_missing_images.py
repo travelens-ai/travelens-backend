@@ -206,9 +206,17 @@ def upload_to_cdn(filepath: str) -> str:
     return ""
 
 
-def link_place_image(cursor, conn, place_id: int, image_name: str, source: str = None) -> bool:
-    """Insert image_name into `images`, link to place via `place_image_map`. Returns True on success."""
+def link_place_image(place_id: int, image_name: str, source: str = None) -> bool:
+    """Insert image_name into `images`, link to place via `place_image_map`. Returns True on success.
+
+    Opens a fresh connection per call — Azure SQL drops idle connections after ~30s when the
+    main loop is busy with downloads/CDN uploads, so sharing a long-lived connection is unreliable.
+    DefaultAzureCredential caches the token so reconnecting is just a TCP handshake (~200ms).
+    """
+    conn = None
     try:
+        conn = _connect()
+        cursor = conn.cursor()
         cursor.execute(
             """
             MERGE images AS tgt
@@ -242,13 +250,15 @@ def link_place_image(cursor, conn, place_id: int, image_name: str, source: str =
         except Exception:
             pass
         return False
+    finally:
+        if conn:
+            conn.close()
 
 
 def main(limit=None):
     TARGET = 5
     conn = _connect()
     read_cursor = conn.cursor()
-    write_cursor = conn.cursor()
 
     read_cursor.execute(
         "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type, "
@@ -309,7 +319,7 @@ def main(limit=None):
                 print(f"  [{idx}/{TARGET}] CDN upload failed.")
                 continue
 
-            if not link_place_image(write_cursor, conn, row["id"], cdn_name, source):
+            if not link_place_image(row["id"], cdn_name, source):
                 print(f"  [{idx}/{TARGET}] DB write failed for {cdn_name} (file is on CDN).")
                 continue
             size_kb = os.path.getsize(filepath) / 1024
@@ -326,7 +336,6 @@ def main(limit=None):
         time.sleep(1.0)
 
     read_cursor.close()
-    write_cursor.close()
     conn.close()
 
     print(f"\nDone. {done} places processed, {failed} failed out of {total}.")
