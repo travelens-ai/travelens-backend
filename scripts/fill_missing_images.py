@@ -67,57 +67,71 @@ _WIKIMEDIA_HEADERS = {
 }
 
 
+def _wikimedia_search(query: str, count: int, offset: int) -> list:
+    """Run one Wikimedia search, return filtered (url, 'wikimedia') list."""
+    resp = requests.get(
+        WIKIMEDIA_URL,
+        headers=_WIKIMEDIA_HEADERS,
+        params={
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": query,
+            "gsrnamespace": 6,
+            "gsrlimit": max((offset + count) * 3, 15),
+            "prop": "imageinfo",
+            "iiprop": "url|size|mime|thumburl",
+            "iiurlwidth": 1200,
+            "format": "json",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    pages = resp.json().get("query", {}).get("pages", {})
+    candidates = sorted(pages.values(), key=lambda x: x.get("index", 99))
+    print(f"  [Wikimedia] {len(candidates)} candidates for '{query}'")
+    valid = []
+    for page in candidates:
+        ii = page.get("imageinfo", [{}])[0]
+        mime = ii.get("mime", "")
+        w = ii.get("width", 0)
+        h = ii.get("height", 0)
+        title = page.get("title", "")
+        title_lower = title.lower()
+        if mime != "image/jpeg":
+            print(f"    skip [{title}] mime={mime}")
+            continue
+        if w <= h:
+            print(f"    skip [{title}] not landscape ({w}x{h})")
+            continue
+        skip_word = next((s for s in _SKIP_WORDS if s in title_lower), None)
+        if skip_word:
+            print(f"    skip [{title}] contains '{skip_word}'")
+            continue
+        url = ii.get("thumburl") or ii.get("url", "")
+        if url:
+            print(f"    ok   [{title}] {w}x{h}")
+            valid.append((url, "wikimedia"))
+    return valid
+
+
 def fetch_wikimedia_urls(query: str, count: int, offset: int = 0) -> list:
     """Return up to `count` (url, 'wikimedia') tuples from Wikimedia Commons.
 
+    Tries the full query first. If it returns 0 candidates, retries with just
+    the first two words (e.g. 'Kaina Temple') to find broader matches.
     offset skips the first N valid results so re-runs don't repeat already-used images.
-    e.g. offset=1 means skip the top result (already used for _1.webp) and return the next N.
     """
     try:
-        resp = requests.get(
-            WIKIMEDIA_URL,
-            headers=_WIKIMEDIA_HEADERS,
-            params={
-                "action": "query",
-                "generator": "search",
-                "gsrsearch": query,
-                "gsrnamespace": 6,
-                "gsrlimit": (offset + count) * 3,
-                "prop": "imageinfo",
-                "iiprop": "url|size|mime|thumburl",
-                "iiurlwidth": 1200,
-                "format": "json",
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        pages = resp.json().get("query", {}).get("pages", {})
-        candidates = sorted(pages.values(), key=lambda x: x.get("index", 99))
-        print(f"  [Wikimedia] {len(candidates)} candidates for '{query}' (need {count}, offset={offset})")
-        valid = []
-        for page in candidates:
-            ii = page.get("imageinfo", [{}])[0]
-            mime = ii.get("mime", "")
-            w = ii.get("width", 0)
-            h = ii.get("height", 0)
-            title = page.get("title", "")
-            title_lower = title.lower()
-            if mime != "image/jpeg":
-                print(f"    skip [{title}] mime={mime}")
-                continue
-            if w <= h:
-                print(f"    skip [{title}] not landscape ({w}x{h})")
-                continue
-            skip_word = next((s for s in _SKIP_WORDS if s in title_lower), None)
-            if skip_word:
-                print(f"    skip [{title}] contains '{skip_word}'")
-                continue
-            url = ii.get("thumburl") or ii.get("url", "")
-            if url:
-                print(f"    ok   [{title}] {w}x{h}")
-                valid.append((url, "wikimedia"))
-        print(f"  [Wikimedia] {len(valid)} valid, returning [{offset}:{offset+count}] = {len(valid[offset:offset+count])}")
-        return valid[offset: offset + count]
+        valid = _wikimedia_search(query, count, offset)
+        if not valid:
+            # Retry with shorter query — drop city/state/India suffix
+            short_query = " ".join(query.split()[:2])
+            if short_query != query:
+                print(f"  [Wikimedia] retrying with shorter query: '{short_query}'")
+                valid = _wikimedia_search(short_query, count, offset)
+        result = valid[offset: offset + count]
+        print(f"  [Wikimedia] {len(valid)} valid, returning {len(result)}")
+        return result
     except Exception as e:
         print(f"  [Wikimedia] error: {e}")
     return []
@@ -293,7 +307,8 @@ def main(limit=None):
         # 2+ images: skip the results already used in prior runs (offset = img_count - 1).
         offset = max(0, img_count - 1)
 
-        query = f"{name} {place_type} {city} India".strip()
+        # Specific query first; Wikimedia fallback uses a broader query if specific returns 0
+        query = f"{name} {city} {state} India".strip()
         base_filename = re.sub(r"[^\w\-]", "_", "_".join(p for p in [name, city, state] if p).replace(" ", "_"))
 
         print(f"[{i}/{total}] {name} ({city}) [{place_type}] (has {img_count}, fetching {needed} more, offset={offset})")
