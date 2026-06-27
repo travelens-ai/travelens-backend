@@ -100,8 +100,8 @@ def _wikimedia_search(query: str, count: int, offset: int) -> list:
         if mime != "image/jpeg":
             print(f"    skip [{title}] mime={mime}")
             continue
-        if w <= h:
-            print(f"    skip [{title}] not landscape ({w}x{h})")
+        if h > w * 1.5:
+            print(f"    skip [{title}] too tall portrait ({w}x{h})")
             continue
         skip_word = next((s for s in _SKIP_WORDS if s in title_lower), None)
         if skip_word:
