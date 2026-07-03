@@ -7,7 +7,37 @@ from functools import wraps
 
 from flask import request, jsonify
 
-from core.config import JWT_SECRET, JWT_EXPIRY
+from core.config import JWT_SECRET, JWT_EXPIRY, DEVICE_JWT_SECRET
+
+
+def decode_device_token(token):
+    """Verify a device JWT signed by the client with DEVICE_JWT_SECRET (HS256).
+
+    Expected payload: {"device_id": <str>, "iat": <int>, "exp": <int optional>}.
+    Returns the payload dict on a valid signature (and unexpired, if `exp` is
+    present), else None. Used for not-logged-in requests: the client proves it
+    is our app by signing with the shared secret and naming its device_id."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        header, payload, signature = parts
+        expected_sig = hmac.HMAC(DEVICE_JWT_SECRET.encode(), f"{header}.{payload}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            return None
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        payload_data = json.loads(base64.urlsafe_b64decode(payload))
+        # exp is optional for device tokens; enforce it when present.
+        exp = payload_data.get("exp")
+        if exp is not None and exp < int(time.time()):
+            return None
+        if not payload_data.get("device_id"):
+            return None
+        return payload_data
+    except Exception:
+        return None
 
 
 def create_token(user_id, email):
