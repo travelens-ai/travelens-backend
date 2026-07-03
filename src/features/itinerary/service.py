@@ -89,6 +89,8 @@ def _prune_result_for_storage(result):
     if not isinstance(result, dict):
         return result
     pruned = copy.deepcopy(result)
+    # Token usage is persisted in its own columns, not in the JSON blob.
+    pruned.pop("token_usage", None)
     data = pruned.get("data")
     if isinstance(data, dict):
         data.pop("places", None)
@@ -98,8 +100,19 @@ def _prune_result_for_storage(result):
     return pruned
 
 
+def _extract_token_usage(result):
+    """Pull (input_token, output_token) out of a generation result. The model
+    attaches `token_usage` at the result top level; returns (None, None) when
+    it's absent (e.g. a cached/edited result without usage)."""
+    usage = result.get("token_usage") if isinstance(result, dict) else None
+    if not isinstance(usage, dict):
+        return None, None
+    return usage.get("input_token"), usage.get("output_token")
+
+
 def store_itinerary(cache_key, user_preferences, result):
     itinerary_id = None
+    input_token, output_token = _extract_token_usage(result)
     if is_db_ready():
         conn = get_connection()
         try:
@@ -109,8 +122,9 @@ def store_itinerary(cache_key, user_preferences, result):
             # a separate `SELECT SCOPE_IDENTITY()` return NULL (it runs in a
             # different batch scope), which was leaving itinerary_id null.
             cursor.execute(
-                "INSERT INTO itineraries (request_json, response_json, status) OUTPUT INSERTED.id VALUES (?, ?, ?)",
-                (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success"),
+                "INSERT INTO itineraries (request_json, response_json, status, input_token, output_token) "
+                "OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?)",
+                (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success", input_token, output_token),
             )
             itinerary_id = int(cursor.fetchone()[0])
             conn.commit()
@@ -132,13 +146,14 @@ def update_itinerary(cache_key, itinerary_id, user_preferences, result):
         return store_itinerary(cache_key, user_preferences, result)
 
     updated = False
+    input_token, output_token = _extract_token_usage(result)
     if is_db_ready():
         conn = get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE itineraries SET request_json = ?, response_json = ?, status = ? WHERE id = ?",
-                (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success", itinerary_id),
+                "UPDATE itineraries SET request_json = ?, response_json = ?, status = ?, input_token = ?, output_token = ? WHERE id = ?",
+                (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success", input_token, output_token, itinerary_id),
             )
             conn.commit()
             updated = cursor.rowcount > 0
