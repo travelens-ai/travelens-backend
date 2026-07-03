@@ -16,6 +16,7 @@ from core.config import PORT
 from core.swagger_config import swagger_template, swagger_config
 from core.db import init_db_async
 from auth import auth_bp
+from auth.guard import authenticate_request
 from features.itinerary import itinerary_bp
 from features.itinerary.service import initialize_recommender, is_initialized
 from features.places import places_bp
@@ -33,6 +34,15 @@ try:
     _server_ip = socket.gethostbyname(socket.gethostname())
 except Exception:
     _server_ip = "unknown"
+
+
+@app.before_request
+def _require_auth():
+    # Global auth gate: logged-in user JWT (Authorization: Bearer) OR device
+    # JWT (X-Device-Token). Auth/login, health and docs paths are exempt.
+    result = authenticate_request()
+    if result is not None:
+        return result
 
 
 @app.after_request

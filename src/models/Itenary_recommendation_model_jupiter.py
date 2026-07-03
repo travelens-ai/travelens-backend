@@ -683,15 +683,16 @@ class ItenaryRecommendationSystem:
             response = self.client.responses.create(
                 model=self.chat_deployment,
                 input=[{"role": "user", "content": prompt}],
+                max_output_tokens=self.max_tokens,
             )
-            response_text = response.output_text
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            itinerary = json.loads(response_text.strip())
+            response_text = self._extract_completed_json(response)
+            try:
+                itinerary = self._parse_itinerary_json(response_text)
+            except ValueError as e:
+                self._log_json_decode_error(response, response_text, e)
+                raise
+
+            self._accumulate_usage(itinerary, response)
 
             return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
 
@@ -828,8 +829,15 @@ class ItenaryRecommendationSystem:
             except (TypeError, ValueError, KeyError):
                 itinerary['total_days'] = len(itinerary.get('itinerary', []))
 
+            # Lift the accumulated token usage out of the itinerary dict to the
+            # result top level so store_itinerary can persist it, and drop the
+            # internal key from the itinerary so it doesn't leak into the
+            # client response / stored response_json.
+            token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
+
             return {
                 'status': 'success',
+                'token_usage': token_usage,
                 'data': {
                     'detailed_itinerary': itinerary,
                     'places': places.to_dict(orient='records')
@@ -1211,6 +1219,208 @@ class ItenaryRecommendationSystem:
         available = [c for c in cols if c in df.columns]
         return df[available].head(n)
 
+    @staticmethod
+    def _accumulate_usage(itinerary, response):
+        """Add this LLM call's token usage to a running total stashed on the
+        itinerary dict under `_token_usage`. Generation can make several calls
+        (the main plan + follow-up top-up days), so usage is summed across all
+        of them. Safe if `response.usage` is missing. The `_token_usage` key is
+        lifted out in _finalize_itinerary and never persisted in response_json."""
+        if not isinstance(itinerary, dict):
+            return
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        acc = itinerary.setdefault("_token_usage", {"input_token": 0, "output_token": 0})
+        acc["input_token"] += int(getattr(usage, "input_tokens", 0) or 0)
+        acc["output_token"] += int(getattr(usage, "output_tokens", 0) or 0)
+
+    @staticmethod
+    def _log_json_decode_error(response, response_text, err):
+        """Dump the model output around a JSON parse failure so we can see WHY it
+        failed (truncation vs malformed content) instead of guessing from the
+        char offset. Prints total length, token usage, response status, and a
+        window of the raw text around the error position."""
+        pos = getattr(err, "pos", None)
+        status = getattr(response, "status", None)
+        usage = getattr(response, "usage", None)
+        print("=" * 70)
+        print(f"[itinerary JSON parse FAILED] {err}")
+        print(f"  response.status = {status}")
+        print(f"  incomplete_details = {getattr(response, 'incomplete_details', None)}")
+        print(f"  usage = {usage}")
+        print(f"  output text length = {len(response_text)} chars")
+        if pos is not None:
+            lo, hi = max(0, pos - 200), min(len(response_text), pos + 200)
+            print(f"  --- text around char {pos} (showing {lo}:{hi}) ---")
+            print(repr(response_text[lo:hi]))
+        print(f"  --- last 200 chars of output ---")
+        print(repr(response_text[-200:]))
+        print("=" * 70)
+
+    @staticmethod
+    def _extract_completed_json(response):
+        """Return the model's text output, stripped of ```json fences, after
+        verifying the response wasn't truncated.
+
+        Longer trips (trip_duration > 3) produce a bigger itinerary JSON. If the
+        model hits its output-token cap it stops mid-JSON, and json.loads then
+        fails deep in the string with a misleading "Expecting ',' delimiter"
+        error. The Responses API flags this as an incomplete status with reason
+        'max_output_tokens' — surface that as a clear error instead."""
+        status = getattr(response, "status", None)
+        if status == "incomplete":
+            reason = getattr(getattr(response, "incomplete_details", None), "reason", None)
+            if reason == "max_output_tokens":
+                raise ValueError(
+                    "Itinerary generation exceeded the model output limit "
+                    "(response truncated). Try a shorter trip_duration or raise "
+                    "max_tokens / the model's max output tokens."
+                )
+            raise ValueError(f"Itinerary generation did not complete (status=incomplete, reason={reason}).")
+
+        return response.output_text
+
+    @staticmethod
+    def _find_json_objects(text):
+        """Yield every balanced top-level {...} substring in `text`, scanning
+        string-aware so braces inside string values don't throw off the depth
+        count. The model sometimes emits more than one JSON document (e.g. a
+        broken partial one, some stray text, then a fresh complete one inside a
+        new ```json fence) — this lets us recover each candidate independently."""
+        i, n = 0, len(text)
+        while i < n:
+            if text[i] != "{":
+                i += 1
+                continue
+            depth = 0
+            in_string = False
+            escaped = False
+            start = i
+            j = i
+            closed = False
+            while j < n:
+                ch = text[j]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif ch == "\\":
+                        escaped = True
+                    elif ch == '"':
+                        in_string = False
+                else:
+                    if ch == '"':
+                        in_string = True
+                    elif ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            yield text[start:j + 1]
+                            closed = True
+                            break
+                j += 1
+            # If this `{` balanced, resume after it; otherwise (a corrupted /
+            # unclosed document, e.g. junk emitted mid-stream) don't skip to the
+            # end — advance one char and try the next `{`, so a well-formed
+            # document appearing later in the text is still recovered.
+            i = (j + 1) if closed else (start + 1)
+
+    @staticmethod
+    def _parse_itinerary_json(response_text):
+        """Best-effort parse of the model's itinerary output.
+
+        Handles the real-world failure modes we've observed:
+          - ```json fences around the JSON,
+          - `// ...` comments and trailing commas (via _sanitize_llm_json),
+          - raw newlines/tabs inside string values (json.loads strict=False),
+          - MULTIPLE documents in one response — a broken one plus a good one —
+            by extracting each balanced {...} object and keeping the best valid
+            itinerary (the one with the most days).
+
+        Returns the parsed dict, or raises ValueError with the last decode error
+        if nothing usable is found."""
+        candidates = list(ItenaryRecommendationSystem._find_json_objects(response_text))
+        if not candidates:
+            # Fall back to the whole string (fences stripped) so the error path
+            # still reports a sensible decode failure.
+            candidates = [response_text]
+
+        best = None
+        best_days = -1
+        last_err = None
+        for raw in candidates:
+            try:
+                cleaned = ItenaryRecommendationSystem._sanitize_llm_json(raw.strip())
+                parsed = json.loads(cleaned, strict=False)
+            except ValueError as e:
+                last_err = e
+                continue
+            if not isinstance(parsed, dict) or "itinerary" not in parsed:
+                continue
+            days = len(parsed.get("itinerary") or [])
+            if days > best_days:
+                best, best_days = parsed, days
+
+        if best is not None:
+            return best
+        if last_err is not None:
+            raise last_err
+        raise ValueError("No itinerary JSON object found in model response.")
+
+    @staticmethod
+    def _sanitize_llm_json(text):
+        """Repair the two malformed-JSON patterns the model reliably emits
+        (both are shown in this prompt's own output-format example, so the model
+        imitates them): `// ...` line comments after a value, and trailing commas
+        before a closing } or ]. Either one makes json.loads fail with a
+        misleading "Expecting ',' delimiter" deep in the string — most often on
+        longer trips, where there are simply more items to trip over.
+
+        Both edits are string-aware: they skip anything inside a JSON string
+        literal, so a `//` or comma that is part of a real value (a URL, an
+        address) is never touched."""
+        out = []
+        in_string = False
+        escaped = False
+        i, n = 0, len(text)
+        while i < n:
+            ch = text[i]
+            if in_string:
+                out.append(ch)
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                i += 1
+                continue
+            # Not inside a string.
+            if ch == '"':
+                in_string = True
+                out.append(ch)
+                i += 1
+            elif ch == "/" and i + 1 < n and text[i + 1] == "/":
+                # Drop a // line comment up to (not including) the newline.
+                while i < n and text[i] != "\n":
+                    i += 1
+            elif ch == ",":
+                # Look ahead past whitespace/newlines; if the next real char
+                # closes a container, this comma is trailing — skip it.
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j < n and text[j] in "}]":
+                    i += 1  # skip the trailing comma
+                else:
+                    out.append(ch)
+                    i += 1
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
+
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
         places_trimmed = self._trim_for_prompt(top_places, self._PLACE_COLS_PROMPT, 30)
         hotels_trimmed = self._trim_for_prompt(top_hotels, self._HOTEL_COLS_PROMPT, 30)
@@ -1221,17 +1431,220 @@ class ItenaryRecommendationSystem:
         response = self.client.responses.create(
             model=self.chat_deployment,
             input=[{"role": "user", "content": prompt}],
+            max_output_tokens=self.max_tokens,
         )
-        response_text = response.output_text
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        if response_text.startswith("```"):
-            response_text = response_text[3:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-        response_text = response_text.strip()
+        response_text = self._extract_completed_json(response)
+        try:
+            itinerary = self._parse_itinerary_json(response_text)
+        except ValueError as e:
+            # flask.json.loads raises the stdlib json.JSONDecodeError (a
+            # ValueError subclass) — catch ValueError so this works regardless
+            # of which `json` is imported at module top.
+            self._log_json_decode_error(response, response_text, e)
+            raise
 
-        return json.loads(response_text)
+        self._accumulate_usage(itinerary, response)
+
+        # The model routinely ignores the requested day count and stops early.
+        # Enforce it programmatically: if it returned fewer days than asked,
+        # generate the missing days with follow-up calls and merge them in.
+        return self._ensure_full_days(
+            itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed
+        )
+
+    def _ensure_full_days(self, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed):
+        """Guarantee the itinerary has `trip_duration` days.
+
+        The LLM often returns fewer days than requested no matter how the prompt
+        is worded. Rather than trust it, we top up: for each missing day we ask
+        the model for just those extra days, passing the places already used so
+        it doesn't repeat them, and append the results. Renumbers days 1..N at
+        the end so the sequence is always contiguous."""
+        try:
+            target = int(user_preferences.get('trip_duration'))
+        except (TypeError, ValueError):
+            return itinerary
+        if not isinstance(itinerary, dict):
+            return itinerary
+
+        days = itinerary.get('itinerary')
+        if not isinstance(days, list):
+            return itinerary
+
+        attempts = 0
+        # Cap follow-ups so a stubborn model can't loop forever; each call can
+        # return several days, so a few attempts covers large gaps.
+        while len(days) < target and attempts < target:
+            attempts += 1
+            used_places = self._collect_used_place_names(days)
+            missing = target - len(days)
+            extra = self._generate_extra_days(
+                user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+                start_day=len(days) + 1, num_days=missing, used_places=used_places,
+                itinerary=itinerary,
+            )
+            if not extra:
+                print(f"[days] top-up call returned no new days (have {len(days)}/{target}); stopping.")
+                break
+            days.extend(extra)
+
+        # Renumber contiguously and trim any overshoot.
+        days = days[:target] if len(days) > target else days
+        for idx, day in enumerate(days, start=1):
+            if isinstance(day, dict):
+                day['day'] = idx
+        itinerary['itinerary'] = days
+        if len(days) < target:
+            print(f"[days] WARNING: could only build {len(days)}/{target} days after top-up.")
+        return itinerary
+
+    @staticmethod
+    def _collect_used_place_names(days):
+        """Names of all places already placed across the given day objects, so
+        follow-up generations can avoid repeating them."""
+        names = []
+        for day in days:
+            if not isinstance(day, dict):
+                continue
+            for place in day.get('places_to_visit', []) or []:
+                name = str((place or {}).get('name', '')).strip()
+                if name and name not in names:
+                    names.append(name)
+        return names
+
+    def _generate_extra_days(self, user_preferences, top_places, top_restaurants, top_hotels,
+                             start_day, num_days, used_places, itinerary=None):
+        """Ask the model for exactly `num_days` additional day objects, numbered
+        from `start_day`, excluding already-used places. Returns a list of day
+        dicts (possibly fewer than requested), or [] on failure. Token usage is
+        added to the running total on `itinerary` when provided."""
+        prompt = self.generate_extra_days_prompt(
+            user_preferences, top_places, top_restaurants, top_hotels,
+            start_day=start_day, num_days=num_days, used_places=used_places,
+        )
+        print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
+        response = self.client.responses.create(
+            model=self.chat_deployment,
+            input=[{"role": "user", "content": prompt}],
+            max_output_tokens=self.max_tokens,
+        )
+        if itinerary is not None:
+            self._accumulate_usage(itinerary, response)
+        response_text = self._extract_completed_json(response)
+        try:
+            parsed = self._parse_days_json(response_text)
+        except ValueError as e:
+            self._log_json_decode_error(response, response_text, e)
+            return []
+        return parsed
+
+    @staticmethod
+    def _parse_days_json(response_text):
+        """Parse a follow-up response that returns extra days. Accepts either a
+        bare JSON array of day objects or an object with an `itinerary` array.
+        Reuses the same tolerant extraction as the main parser."""
+        # Try object-with-itinerary first (matches the main format).
+        for raw in ItenaryRecommendationSystem._find_json_objects(response_text):
+            try:
+                obj = json.loads(ItenaryRecommendationSystem._sanitize_llm_json(raw.strip()), strict=False)
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and isinstance(obj.get('itinerary'), list):
+                return obj['itinerary']
+        # Fall back to a top-level array.
+        cleaned = ItenaryRecommendationSystem._sanitize_llm_json(response_text.strip())
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        if cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+        parsed = json.loads(cleaned, strict=False)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict) and isinstance(parsed.get('itinerary'), list):
+            return parsed['itinerary']
+        raise ValueError("Follow-up response did not contain a days array.")
+
+    def generate_extra_days_prompt(self, user_preferences, top_places, top_restaurants, top_hotels,
+                                   start_day, num_days, used_places):
+        used_block = ", ".join(used_places) if used_places else "(none yet)"
+        prompt = f"""
+        You are extending an existing multi-day travel itinerary. Generate ONLY the
+        additional days requested — do not repeat any place already used.
+
+        ### Trip context
+        - Destination / places of interest: {user_preferences['places_of_interest']}
+        - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
+        - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
+        - Food preferences: {user_preferences['food_preferences']}
+        - Trip type: {user_preferences['trip_type']}
+        - Budget: {user_preferences['budget']}
+
+        ### Places already used (DO NOT reuse any of these)
+        {used_block}
+
+        ### Recommended Places (prefer unused ones from here; then use your own travel knowledge)
+        {top_places}
+
+        ### Restaurants Dataset
+        {top_restaurants}
+
+        ### 🏨 Hotels Dataset
+        {top_hotels}
+
+        ### Task
+        Generate EXACTLY {num_days} new day object(s), numbered {start_day} through {start_day + num_days - 1}.
+        Use real, distinct nearby attractions, day-trips, and experiences so every new
+        day is full with 2–3 places, 2–3 restaurants, and 2–3 hotels. Never reuse a
+        place from the "already used" list or repeat within these new days.
+
+        ### Output Format
+        Return ONLY a JSON object with a single key `itinerary` whose value is an array
+        of the new day objects. No markdown, no comments, no trailing commas. Each day:
+
+        {{
+          "itinerary": [
+            {{
+              "day": {start_day},
+              "places_to_visit": [
+                {{
+                  "name": "Place Name",
+                  "location": "City, State",
+                  "reason": "why it fits",
+                  "activities": ["Activity 1", "Activity 2"],
+                  "rating": "X.X",
+                  "opening_hours": "9:00 AM – 6:00 PM",
+                  "duration": "1.5–2 hours"
+                }}
+              ],
+              "restaurants": [
+                {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX",
+                  "rating": "X.X",
+                  "location": "Area Name",
+                  "reason": "matches food preference"
+                }}
+              ],
+              "hotels": [
+                {{
+                  "name": "Hotel Name",
+                  "type": "Hotel Type",
+                  "price_range": "₹XXX",
+                  "rating": "X.X",
+                  "location": "City",
+                  "reason": "near visited places",
+                  "link": "valid page URL"
+                }}
+              ]
+            }}
+          ]
+        }}
+        """
+        return textwrap.dedent(prompt)
 
     def generate_travel_itinerary_prompt(self,user_preferences, top_places, top_restaurants, top_hotels):
         prompt = f"""
@@ -1280,9 +1693,10 @@ class ItenaryRecommendationSystem:
         ### 🧠 Rules
 
         1. The final output **must be 100% valid JSON**. Strictly no broken or partial JSON.
-        2. If `suggested_places` is empty or not provided, you **must generate exactly {user_preferences['trip_duration']} full days** in the itinerary — no more, no fewer. This is not negotiable.
-        3. You **must include all {user_preferences['suggested_places']} in the itinerary**. If including them increases the number of days, **extend the trip duration accordingly and generate the itinerary for the new total number of days**.
-        4. If datasets do not have enough entries to cover all days, you **must use GenAI knowledge** to fill missing places, restaurants, or hotels.
+        2. 🚨 DAY COUNT IS MANDATORY: The `itinerary` array **must contain exactly {user_preferences['trip_duration']} day objects** (day 1 through day {user_preferences['trip_duration']}), regardless of how many places are supplied. Never stop early. If you have more than {user_preferences['trip_duration']} days' worth of places, still produce exactly {user_preferences['trip_duration']} days. This is not negotiable — an itinerary with fewer than {user_preferences['trip_duration']} days is INVALID.
+        3. You **must include all {user_preferences['suggested_places']} in the itinerary**. If including them requires more than {user_preferences['trip_duration']} days, extend to the number of days actually needed and set `total_days` to that larger number.
+        4. To fill all {user_preferences['trip_duration']} days, first use every relevant place from the Recommended Places dataset that is not already used, then use your own GenAI travel knowledge to add more real, distinct nearby attractions, day-trips, and experiences so **every day is full** (2–3 places each). Do not leave any day empty or thin, and do not repeat places across days.
+        4b. Only if the destination genuinely cannot fill {user_preferences['trip_duration']} days even after adding day-trips and nearby attractions: still output all {user_preferences['trip_duration']} days, but set the top-level `notes` field to a short sentence telling the user the destination is comfortably covered in fewer days (state the recommended number) and suggesting optional add-ons. If {user_preferences['trip_duration']} days fits well, set `notes` to "".
         5. Each day must include:
           - 2–3 geographically close places to visit.
           - 2–3 restaurants (match cuisine and location).
@@ -1327,6 +1741,10 @@ class ItenaryRecommendationSystem:
 
         ### 📦 Output Format (JSON)
 
+        The example below shows a single day object. Repeat the same day structure
+        for every day from 1 to {user_preferences['trip_duration']} inside the `itinerary`
+        array (no comma after the last day).
+
         {{
           "itinerary": [
             {{
@@ -1339,14 +1757,14 @@ class ItenaryRecommendationSystem:
                   "activities": ["Activity 1", "Activity 2"],
                   "rating": "X.X",
                   "opening_hours": "9:00 AM – 6:00 PM",
-                  "duration": "1.5–2 hours",
+                  "duration": "1.5–2 hours"
                 }}
               ],
               "restaurants": [
                 {{
                   "name": "Restaurant Name",
                   "cuisine": "Cuisine Type",
-                  "approx_cost": "₹XXX", // if budget is given, match cost range accordingly; else choose normally
+                  "approx_cost": "₹XXX",
                   "rating": "X.X",
                   "location": "Area Name",
                   "reason": "Matches your food preference: {user_preferences['food_preferences']}"
@@ -1356,7 +1774,7 @@ class ItenaryRecommendationSystem:
                 {{
                   "name": "Hotel Name",
                   "type": "Hotel Type",
-                  "price_range": "₹XXX", // match this to budget: low (1000–3000) | mid (3000–8000) | high (8000+) — auto select if no budget
+                  "price_range": "₹XXX",
                   "rating": "X.X",
                   "location": "City",
                   "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
@@ -1364,10 +1782,11 @@ class ItenaryRecommendationSystem:
                 }}
               ]
             }}
-            // Repeat same structure for next days — NO comma after the last day.
           ],
           "name": "Place Name",
           "description": "Short description of the place",
+          "total_days": {user_preferences['trip_duration']},
+          "notes": "Empty string when the trip_duration fits well; otherwise a short note that the destination is best covered in fewer days (see rule 4b).",
           "price_estimated_range": "give the total price range estimated per head. It should be in the range of ${user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
           "state": "State Name",
           "city": "City Name",
@@ -1493,6 +1912,10 @@ class ItenaryRecommendationSystem:
 
         ### 📦 Output Format (JSON)
 
+        The example below shows a single day object. Repeat the same day structure
+        for every day from 1 to {user_preferences['trip_duration']} inside the `itinerary`
+        array (no comma after the last day).
+
         {{
           "itinerary": [
             {{
@@ -1505,14 +1928,14 @@ class ItenaryRecommendationSystem:
                   "activities": ["Activity 1", "Activity 2"],
                   "rating": "X.X",
                   "opening_hours": "9:00 AM – 6:00 PM",
-                  "duration": "1.5–2 hours",
+                  "duration": "1.5–2 hours"
                 }}
               ],
               "restaurants": [
                 {{
                   "name": "Restaurant Name",
                   "cuisine": "Cuisine Type",
-                  "approx_cost": "₹XXX", // if budget is given, match cost range accordingly; else choose normally
+                  "approx_cost": "₹XXX",
                   "rating": "X.X",
                   "location": "Area Name",
                   "reason": "Matches your food preference: {user_preferences['food_preferences']}"
@@ -1522,7 +1945,7 @@ class ItenaryRecommendationSystem:
                 {{
                   "name": "Hotel Name",
                   "type": "Hotel Type",
-                  "price_range": "₹XXX", // match this to budget: low (1000–3000) | mid (3000–8000) | high (8000+) — auto select if no budget
+                  "price_range": "₹XXX",
                   "rating": "X.X",
                   "location": "City",
                   "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
@@ -1530,12 +1953,11 @@ class ItenaryRecommendationSystem:
                 }}
               ]
             }}
-            // Repeat same structure for next days — NO comma after the last day.
           ],
           "name": "Place Name",
           "description": "Short description of the place",
-          "total_days": {user_preferences['trip_duration']}, // the actual number of days in this itinerary (increase if you extended the trip to fit all must-include places)
-          "notes": "", // empty string if no change; otherwise explain that the trip was extended to fit all selected places
+          "total_days": {user_preferences['trip_duration']},
+          "notes": "",
           "price_estimated_range": "give the total price range estimated per head. It should be in the range of ${user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
           "state": "State Name",
           "city": "City Name",
@@ -1779,9 +2201,8 @@ class ItenaryRecommendationSystem:
             if srow:
                 state_id = srow[0]
         cursor.execute(
-            "INSERT INTO cities (name, state_id) VALUES (?, ?)", (city, state_id)
+            "INSERT INTO cities (name, state_id) OUTPUT INSERTED.id VALUES (?, ?)", (city, state_id)
         )
-        cursor.execute("SELECT SCOPE_IDENTITY()")
         return int(cursor.fetchone()[0])
 
 

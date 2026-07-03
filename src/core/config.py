@@ -6,6 +6,11 @@ load_dotenv()
 # Auth
 JWT_SECRET = os.getenv("JWT_SECRET_KEY", "travelens-jwt-secret-key-2024")
 JWT_EXPIRY = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES", 86400))
+# Shared secret the client uses to sign a device JWT for unauthenticated
+# (not-logged-in) requests. Overridable via .env; keep out of source in prod.
+DEVICE_JWT_SECRET = os.getenv(
+    "DEVICE_JWT_SECRET", "OQ2Igc1oi3iAHUdUSjRE4h3UadqfNnC2iVZm0i7uLQHsEQpZ05oEaApZ_0_Jw-0a"
+)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")

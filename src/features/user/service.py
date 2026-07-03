@@ -55,7 +55,7 @@ def get_favorites(user_id):
                FROM favorites f
                LEFT JOIN itineraries i ON f.itinerary_id = i.id
                WHERE f.user_id = ?
-               ORDER BY f.created_at DESC""",
+               ORDER BY f.id DESC""",
             (user_id,),
         )
         favorites = _fetchall_dicts(cursor)
@@ -129,7 +129,7 @@ def get_history(user_id):
                FROM history h
                LEFT JOIN itineraries i ON h.itinerary_id = i.id
                WHERE h.user_id = ?
-               ORDER BY h.created_at DESC""",
+               ORDER BY h.id DESC""",
             (user_id,),
         )
         history = _fetchall_dicts(cursor)
