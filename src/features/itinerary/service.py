@@ -104,11 +104,14 @@ def store_itinerary(cache_key, user_preferences, result):
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            # OUTPUT INSERTED.id returns the new identity as part of the INSERT's
+            # own result set. This is immune to the scope/batch pitfall that makes
+            # a separate `SELECT SCOPE_IDENTITY()` return NULL (it runs in a
+            # different batch scope), which was leaving itinerary_id null.
             cursor.execute(
-                "INSERT INTO itineraries (request_json, response_json, status) VALUES (?, ?, ?)",
+                "INSERT INTO itineraries (request_json, response_json, status) OUTPUT INSERTED.id VALUES (?, ?, ?)",
                 (json.dumps(user_preferences, default=_json_default), json.dumps(_prune_result_for_storage(result), default=_json_default), "success"),
             )
-            cursor.execute("SELECT SCOPE_IDENTITY()")
             itinerary_id = int(cursor.fetchone()[0])
             conn.commit()
             cursor.close()
