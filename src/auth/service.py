@@ -135,10 +135,10 @@ def create_user(name, email, password, phone=None, age=None, gender=None, trip_t
         password_hash = hash_password(password)
         cursor.execute(
             """INSERT INTO users (name, email, phone, password_hash, age, gender, trip_type, trip_companion, is_verified)
+               OUTPUT INSERTED.id
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
             (name, email, phone, password_hash, age, gender, trip_type, trip_companion),
         )
-        cursor.execute("SELECT SCOPE_IDENTITY()")
         user_id = int(cursor.fetchone()[0])
         conn.commit()
 
@@ -279,10 +279,9 @@ def google_upsert_user(google_id, email, name, picture, device_id=None):
             }, "is_new": False}, ("success", "Login successful", 200)
         else:
             cursor.execute(
-                "INSERT INTO users (name, email, google_id, profile_picture, is_verified) VALUES (?, ?, ?, ?, 1)",
+                "INSERT INTO users (name, email, google_id, profile_picture, is_verified) OUTPUT INSERTED.id VALUES (?, ?, ?, ?, 1)",
                 (name, email, google_id, picture),
             )
-            cursor.execute("SELECT SCOPE_IDENTITY()")
             user_id = int(cursor.fetchone()[0])
             conn.commit()
             token = create_token(user_id, email)

@@ -1779,9 +1779,8 @@ class ItenaryRecommendationSystem:
             if srow:
                 state_id = srow[0]
         cursor.execute(
-            "INSERT INTO cities (name, state_id) VALUES (?, ?)", (city, state_id)
+            "INSERT INTO cities (name, state_id) OUTPUT INSERTED.id VALUES (?, ?)", (city, state_id)
         )
-        cursor.execute("SELECT SCOPE_IDENTITY()")
         return int(cursor.fetchone()[0])
 
 
