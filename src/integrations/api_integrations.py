@@ -300,6 +300,14 @@ class GooglePlacesClient:
             r = resp.json()
             print(f"[GooglePlacesClient] quota: {count}/{DAILY_QUOTA_LIMIT} used today")
 
+            def _extract_text(obj):
+                if not obj:
+                    return None
+                v = obj.get("text")
+                if isinstance(v, dict):
+                    return v.get("text")
+                return v
+
             loc = r.get("location") or {}
             hours = (r.get("regularOpeningHours") or {}).get("weekdayDescriptions")
             current_hours = (r.get("currentOpeningHours") or {}).get("weekdayDescriptions")
@@ -380,7 +388,7 @@ class GooglePlacesClient:
                 # Enterprise + Atmosphere
                 "google_photo_refs":              photos if photos else None,
                 "google_reviews":                 reviews if reviews else None,
-                "review_summary":                 (r.get("reviewSummary") or {}).get("text"),
+                "review_summary":                 _extract_text(r.get("reviewSummary")),
                 "editorial_summary":              (r.get("editorialSummary") or {}).get("text"),
                 "generative_summary":             ((r.get("generativeSummary") or {}).get("overview") or {}).get("text"),
                 "neighborhood_summary":           ((r.get("neighborhoodSummary") or {}).get("overview") or {}).get("text"),
@@ -397,8 +405,8 @@ class GooglePlacesClient:
                 "live_music":                     r.get("liveMusic"),
                 "menu_for_children":              r.get("menuForChildren"),
                 "outdoor_seating":                r.get("outdoorSeating"),
-                "parking_options":                r.get("parkingOptions"),
-                "payment_options":                r.get("paymentOptions"),
+                "parking_options":                json.dumps(r["parkingOptions"]) if r.get("parkingOptions") else None,
+                "payment_options":                json.dumps(r["paymentOptions"]) if r.get("paymentOptions") else None,
                 "reservable":                     r.get("reservable"),
                 "restroom":                       r.get("restroom"),
                 "serves_beer":                    r.get("servesBeer"),
