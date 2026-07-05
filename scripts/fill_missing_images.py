@@ -15,6 +15,7 @@ Run from project root:
     .venv/bin/python3 scripts/fill_missing_images.py --limit 10  # test first N
 """
 
+import json
 import os
 import re
 import struct
@@ -275,13 +276,14 @@ def main(limit=None):
     read_cursor = conn.cursor()
 
     read_cursor.execute(
-        "SELECT p.id, p.name, c.name AS city, s.name AS state, p.type, "
+        "SELECT p.id, p.name, p.display_name, p.address_components, "
+        "c.name AS city, s.name AS state, p.type, "
         "COUNT(pim.image_id) AS img_count "
         "FROM places p "
         "LEFT JOIN cities c ON p.city_id = c.id "
         "LEFT JOIN states s ON c.state_id = s.id "
         "LEFT JOIN place_image_map pim ON pim.place_id = p.id "
-        "GROUP BY p.id, p.name, c.name, s.name, p.type "
+        "GROUP BY p.id, p.name, p.display_name, p.address_components, c.name, s.name, p.type "
         "HAVING COUNT(pim.image_id) < 5 "
         "ORDER BY COUNT(pim.image_id) ASC"
     )
@@ -296,9 +298,23 @@ def main(limit=None):
     failed = 0
 
     for i, row in enumerate(rows, 1):
-        name = row["name"].title()
-        city = (row["city"] or "").title()
-        state = (row["state"] or "").title()
+        # Resolve name/city/state: Google data first, fall back to local DB values
+        addr_comp = row.get("address_components")
+        g_city = g_state = None
+        if addr_comp:
+            try:
+                for comp in json.loads(addr_comp):
+                    types = comp.get("types", [])
+                    if g_city is None and any(t in types for t in ("locality", "administrative_area_level_2", "administrative_area_level_3")):
+                        g_city = comp.get("longText")
+                    if g_state is None and "administrative_area_level_1" in types:
+                        g_state = comp.get("longText")
+            except Exception:
+                pass
+
+        name = (row.get("display_name") or row["name"]).strip()
+        city = (g_city or row.get("city") or "").strip()
+        state = (g_state or row.get("state") or "").strip()
         place_type = (row["type"] or "").title()
         img_count = row.get("img_count", 0)
         needed = TARGET - img_count

@@ -194,15 +194,25 @@ class ItenaryRecommendationSystem:
                        p.dist_airport AS [distance from airport],
                        p.dist_bus_stand AS [distance from bus stand],
                        p.dist_railway AS [distance from railway station],
-                       p.prefer_friends AS [prefer for friends],
-                       p.prefer_couple AS [prefer for couple],
-                       p.prefer_family_children AS [prefer for family with children],
-                       p.prefer_family_no_children AS [prefer for family without children],
+                       p.prefer_friends AS prefer_friends,
+                       p.prefer_couple AS prefer_couple,
+                       p.prefer_family_children AS prefer_family_children,
+                       p.prefer_family_no_children AS prefer_family_no_children,
                        p.opening_hours AS opening_hours,
                        p.website_uri AS website_uri,
                        p.phone_number AS phone_number,
                        p.place_types AS place_types,
-                       p.lat AS lat, p.lon AS lon
+                       p.lat AS lat, p.lon AS lon,
+                       p.display_name AS display_name,
+                       p.google_rating AS google_rating,
+                       p.google_rating_count AS google_rating_count,
+                       p.primary_type_name AS primary_type_name,
+                       p.short_formatted_address AS short_formatted_address,
+                       p.editorial_summary AS editorial_summary,
+                       p.review_summary AS review_summary,
+                       p.google_maps_uri AS google_maps_uri,
+                       p.google_photo_refs AS google_photo_refs,
+                       p.business_status AS business_status
                 FROM places p
                 LEFT JOIN cities c ON p.city_id = c.id
                 LEFT JOIN states st ON c.state_id = st.id
@@ -210,7 +220,7 @@ class ItenaryRecommendationSystem:
             )
             if rows:
                 df = pd.DataFrame(rows)
-                df = self._coerce_numeric(df, ['rating', 'no of rating'])
+                df = self._coerce_numeric(df, ['rating', 'no of rating', 'google_rating', 'google_rating_count'])
                 print(f"  Loaded {len(df)} places from DB.")
                 return df
             print("  places table empty — falling back to CSV.")
@@ -401,6 +411,29 @@ class ItenaryRecommendationSystem:
         df['famous activities with rating'] = df['famous activities with rating'].apply(
             lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('{') else {}
         )
+
+        # Derive effective_name: prefer Google's official display_name over internal name
+        if 'display_name' in df.columns:
+            df['effective_name'] = df['display_name'].where(
+                df['display_name'].notna() & (df['display_name'].astype(str).str.strip() != ''),
+                df['placename']
+            )
+        else:
+            df['effective_name'] = df['placename']
+
+        # Derive suitable_for: human-readable label from the 4 prefer_* boolean flags
+        _pref_map = {
+            'prefer_friends': 'friends',
+            'prefer_couple': 'couples',
+            'prefer_family_children': 'family with kids',
+            'prefer_family_no_children': 'family without kids',
+        }
+        def _suitable_for_label(row):
+            labels = [label for col, label in _pref_map.items()
+                      if col in row and row[col]]
+            return ', '.join(labels) if labels else ''
+        df['suitable_for'] = df.apply(_suitable_for_label, axis=1)
+
         return df
 
     def merge_list(self, activities):
@@ -944,9 +977,10 @@ class ItenaryRecommendationSystem:
         return None
 
     def _attach_db_fields(self, itinerary):
-        """Override LLM-generated opening_hours/website_uri/phone_number with
-        verified Google data from the DB whenever available. Silently skips
-        places not found in the DB lookup."""
+        """Override LLM-generated fields with verified Google data from the DB.
+        Also attaches UI-only fields (google_maps_uri, google_photo_refs) that
+        are not passed to the prompt but are needed by the frontend. Silently
+        skips places not found in the DB lookup."""
         if self.places_df is None or self.places_df.empty:
             return
         db_lookup = {
@@ -959,12 +993,18 @@ class ItenaryRecommendationSystem:
                 db = db_lookup.get(key)
                 if not db:
                     continue
+                # Override LLM-generated fields with authoritative Google data
                 if db.get("opening_hours"):
                     place["opening_hours"] = db["opening_hours"]
                 if db.get("website_uri"):
                     place["website_uri"] = db["website_uri"]
                 if db.get("phone_number"):
                     place["phone_number"] = db["phone_number"]
+                # UI-only fields — never in the prompt, attached here for the frontend
+                if db.get("google_maps_uri"):
+                    place["google_maps_uri"] = db["google_maps_uri"]
+                if db.get("google_photo_refs"):
+                    place["google_photo_refs"] = db["google_photo_refs"]
 
     def _attach_lat_long(self, itinerary):
         """Populate `lat`/`lon`/`full_address` on every place, restaurant and
@@ -1211,7 +1251,25 @@ class ItenaryRecommendationSystem:
             print(f"  _generate_destination_description failed for {destination!r}: {e}")
             return ""
 
-    _PLACE_COLS_PROMPT = ['name', 'city', 'type', 'rating', 'famous activities', 'best month to visit']
+    # Whitelist of columns passed to the LLM generation prompt — THE ONLY GATE.
+    # _trim_for_prompt selects only these; the full DataFrame never reaches the LLM.
+    # google_rating/google_rating_count are primary; internal rating kept as fallback.
+    # editorial_summary and review_summary are included when available (partial fill is fine).
+    _PLACE_COLS_PROMPT = [
+        'effective_name',           # Google display_name where available, else internal name (95%)
+        'short_formatted_address',  # replaces 'city' — neighbourhood-level context (93%)
+        'primary_type_name',        # replaces 'type' — e.g. "Hindu Temple" vs "Religious Site" (75%)
+        'place_types',              # multi-value: "monument, tourist_attraction" (96%)
+        'google_rating',            # primary rating — higher review count than internal (81%)
+        'google_rating_count',      # primary review count (81%)
+        'rating',                   # fallback for 847 rows where google_rating is NULL (98%)
+        'famous activities',        # curated activity list for preference matching (100%)
+        'best month to visit',      # seasonal scheduling context (98%)
+        'opening_hours',            # real hours for ordering by opening time — LLM hallucinates without it (43%)
+        'editorial_summary',        # curated ~93-char description when available (31%)
+        'review_summary',           # crowd sentiment ~326 chars when available (36%)
+        'suitable_for',             # derived from prefer_* flags — group suitability (100%)
+    ]
     _HOTEL_COLS_PROMPT = ['property_name', 'city', 'hotel_star_rating', 'site_review_rating', 'property_type']
     _REST_COLS_PROMPT  = ['Name', 'City', 'Cuisine', 'Rating', 'Cost', 'Locality']
 
