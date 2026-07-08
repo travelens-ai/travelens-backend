@@ -85,28 +85,22 @@ def _fix_total_days(response):
 
 
 def _inject_itinerary_ads(response):
-    """Add ad slots between the places / accommodations / restaurants sections of
-    each day in a (non-streaming) itinerary response. Mutates and returns the
-    response. Each day gets a `section_ads` block so the client can place an ad
-    between the sections without disturbing the existing arrays."""
+    """Add ad slots between places/meals sections of each day, and a single ad
+    slot for the trip-level hotels section. Mutates and returns the response."""
     if not isinstance(response, dict):
         return response
     itinerary = response.get("data", {}).get("detailed_itinerary", {}) or {}
     for day in itinerary.get("itinerary", []):
         places = day.get("places_to_visit") or []
-        hotels = day.get("hotels") or []
-        restaurants = day.get("restaurants") or []
+        meals = day.get("meals") or {}
         section_ads = {}
-        # Ad after places (before accommodations) and after accommodations
-        # (before restaurants) — only when both adjacent sections exist.
-        if places and hotels:
+        if places and meals:
             section_ads["after_places"] = section_ad()
-        if hotels and restaurants:
-            section_ads["after_accommodations"] = section_ad()
         if section_ads:
             day["section_ads"] = section_ads
-    # Attach the inline ad slot config for the itinerary section so the client
-    # knows the slot's adtype/dimensions/refresh behavior.
+    # Single ad slot for the trip-level hotels section.
+    if itinerary.get("hotels"):
+        itinerary["hotel_section_ad"] = section_ad()
     response["ads"] = get_inline_ads_config("itinerary_section")
     return response
 
@@ -114,28 +108,27 @@ def _inject_itinerary_ads(response):
 def _decompose_response_events(response, itinerary_id, skip_events=None):
     """Yield granular SSE event dicts from a finalized itinerary response, in
     this order:
-      1. info         — name/title, description, city, state, totals, notes
-      2. images       — the main destination image gallery
-      3. place        — each place_to_visit, one per event, day by day
-         restaurant   — each restaurant, one per event, day by day
-         hotel        — each hotel, one per event, day by day
-      4. similar_place— each similar place, one per event
-      5. places       — the recommended `places` list (whole array)
-      6. done         — terminal marker carrying itinerary_id
-    `skip_events` is a set of event names to omit (e.g. {"info","images"} when
-    they were already streamed early). Images are already URL-prefixed by the
-    caller (with_image_urls)."""
+      1. ads_config   — inline ad slot config
+      2. info         — name/title, description, city, state, totals, notes
+      3. images       — the main destination image gallery
+      4. hotels       — trip-level hotels (one event, all 3 options)
+      5. per day:
+           place      — each place_to_visit, one per event
+           ad         — ad slot between places and meals
+           meal       — breakfast/lunch/dinner, one per event (with slot field)
+      6. similar_place— each similar place, one per event
+      7. done         — terminal marker carrying itinerary_id
+    `skip_events` is a set of event names to omit. Images are already
+    URL-prefixed by the caller (with_image_urls)."""
     skip_events = skip_events or set()
     data = response.get("data", {}) if isinstance(response, dict) else {}
     itinerary = data.get("detailed_itinerary", {}) or {}
 
-    # 0. Inline ad slot config for the itinerary section (so the client knows
-    # the adtype/dimensions/refresh for the `ad` events streamed below).
+    # 0. Inline ad slot config.
     if "ads_config" not in skip_events:
         yield {"event": "ads_config", "ads": get_inline_ads_config("itinerary_section")}
 
-    # 1. Title / description and top-level info. Emit the authoritative values
-    # from the generated itinerary unless they were already streamed early.
+    # 1. Top-level info.
     if "info" not in skip_events:
         yield {
             "event": "info",
@@ -152,33 +145,30 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     if "images" not in skip_events:
         yield {"event": "images", "images": itinerary.get("images", [])}
 
-    # 3. Day by day: places, then an ad, then accommodations, then an ad, then
-    # restaurants — one item per event, ad slots between the sections.
+    # 3. Trip-level hotels (one event, emitted once for the whole trip).
+    trip_hotels = itinerary.get("hotels", [])
+    if trip_hotels:
+        yield {"event": "hotels", "hotels": trip_hotels}
+
+    # 4. Day by day: places → ad → meals (breakfast/lunch/dinner).
     for day in itinerary.get("itinerary", []):
         day_no = day.get("day")
         places = day.get("places_to_visit", [])
-        hotels = day.get("hotels", [])
-        restaurants = day.get("restaurants", [])
+        meals = day.get("meals", {})
 
         for place in places:
             yield {"event": "place", "day": day_no, "item": place}
-        if places and hotels:
+        if places and meals:
             yield {"event": "ad", "day": day_no, "item": section_ad()}
 
-        for hotel in hotels:
-            yield {"event": "hotel", "day": day_no, "item": hotel}
-        if hotels and restaurants:
-            yield {"event": "ad", "day": day_no, "item": section_ad()}
+        for slot in ("breakfast", "lunch", "dinner"):
+            meal = meals.get(slot)
+            if meal:
+                yield {"event": "meal", "day": day_no, "slot": slot, "item": meal}
 
-        for restaurant in restaurants:
-            yield {"event": "restaurant", "day": day_no, "item": restaurant}
-
-    # 4. Similar places, one per event.
+    # 5. Similar places, one per event.
     for similar in itinerary.get("similar_places", []):
         yield {"event": "similar_place", "item": similar}
-
-    # 5. The recommended places list.
-    yield {"event": "places", "places": data.get("places", [])}
 
     # 6. Terminal marker.
     yield {"event": "done", "itinerary_id": itinerary_id}
@@ -190,7 +180,7 @@ def generate_itinerary_stream():
 
     Emits `progress` events while the itinerary is being built, then streams the
     result piece by piece: `images`, `info`, then `place`/`restaurant`/`hotel`
-    events day by day, then `similar_place` events, then `places`, and finally a
+    events day by day, then `similar_place` events, and finally a
     `done` event with the itinerary_id. On failure, emits an `error` event.
     ---
     tags:

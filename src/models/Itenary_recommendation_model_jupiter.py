@@ -190,7 +190,8 @@ class ItenaryRecommendationSystem:
                        p.famous_activities_rating AS [famous activities with rating],
                        (SELECT TOP 1 i.image_name FROM place_image_map pim
                           JOIN images i ON pim.image_id = i.id
-                         WHERE pim.place_id = p.id) AS image,
+                         WHERE pim.place_id = p.id
+                         ORDER BY CASE WHEN i.image_name LIKE '%\\_0.webp' ESCAPE '\\' THEN 0 ELSE 1 END) AS image,
                        p.dist_airport AS [distance from airport],
                        p.dist_bus_stand AS [distance from bus stand],
                        p.dist_railway AS [distance from railway station],
@@ -242,7 +243,8 @@ class ItenaryRecommendationSystem:
                     FROM places p
                     JOIN place_image_map pim ON pim.place_id = p.id
                     JOIN images i ON pim.image_id = i.id
-                    WHERE LOWER(p.name) IN ({placeholders})""",
+                    WHERE LOWER(p.name) IN ({placeholders})
+                    ORDER BY CASE WHEN i.image_name LIKE '%\\_0.webp' ESCAPE '\\' THEN 0 ELSE 1 END""",
                 tuple(names),
             )
         except Exception as e:
@@ -277,7 +279,7 @@ class ItenaryRecommendationSystem:
             try:
                 rows = fetch_dicts(
                     "SELECT TOP (?) image_name FROM images WHERE LOWER(image_name) LIKE ? "
-                    "ORDER BY id",
+                    "ORDER BY CASE WHEN image_name LIKE '%\\_0.webp' ESCAPE '\\' THEN 0 ELSE 1 END, id",
                     (limit, "%" + escaped + "%"),
                 )
             except Exception as e:
@@ -402,6 +404,18 @@ class ItenaryRecommendationSystem:
         # Clean column names
         df = df.rename(columns={'name': 'placename'})
         df = df.drop_duplicates(subset=['placename'], keep='first')
+
+        # Use Google rating/count as primary; fall back to internal values.
+        # google_rating and google_rating_count are already coerced to numeric
+        # by _load_places_df before this is called.
+        if 'google_rating' in df.columns:
+            df['rating'] = df['google_rating'].where(
+                df['google_rating'].notna(), df['rating']
+            )
+        if 'google_rating_count' in df.columns:
+            df['no of rating'] = df['google_rating_count'].where(
+                df['google_rating_count'].notna(), df['no of rating']
+            )
 
         # Replace '/' with ',' in comma-separated fields
         df['famous activities'] = df['famous activities'].str.replace('/', ',')
@@ -776,32 +790,48 @@ class ItenaryRecommendationSystem:
             if placename in place_image_map and pd.notna(place_image_map[placename]):
                 main_single_image = place_image_map[placename]
 
-            # Attach a single image to every place in each day's places_to_visit.
-            # Match the LLM-generated place name (title case) against our image
-            # map (DB placenames are lowercase) case-insensitively; fall back to
-            # a default image so the field is always populated.
+            # Attach 4-5 images (_0 hero first) to every place in each day's
+            # places_to_visit. Batch-fetch all place names via _get_images_for_places
+            # (DB join, already ordered _0 first), then keyword-search as fallback.
+            itin_city = itinerary.get('city')
+            itin_state = itinerary.get('state')
+
+            all_place_names = [
+                str(place.get('name', '')).strip()
+                for day in itinerary.get('itinerary', [])
+                for place in day.get('places_to_visit', [])
+                if str(place.get('name', '')).strip()
+            ]
+            place_images_db = self._get_images_for_places(all_place_names) if all_place_names else {}
+
             normalized_image_map = {
                 str(name).strip().lower(): img
                 for name, img in place_image_map.items()
             }
-            itin_city = itinerary.get('city')
-            itin_state = itinerary.get('state')
+
             for day in itinerary.get('itinerary', []):
                 for place in day.get('places_to_visit', []):
                     place_name = str(place.get('name', '')).strip()
                     key = place_name.lower()
-                    image = normalized_image_map.get(key)
-                    if not image or (not isinstance(image, list) and pd.isna(image)):
-                        # No mapped image — search the images table by keyword,
-                        # most specific first: this place's name, then the
-                        # location ("City, State"), then the itinerary city/state.
+
+                    images = place_images_db.get(key, [])[:5]
+
+                    if not images:
                         location = place.get('location', '') or ''
                         loc_parts = [p.strip() for p in str(location).split(',') if p.strip()]
                         keywords = [place_name] + loc_parts + [itin_city, itin_state]
-                        image = self._search_image_by_keywords(keywords)
-                    if not image or (not isinstance(image, list) and pd.isna(image)):
-                        image = 'default' + str(random.randint(1, 7)) + '.webp'
-                    place['image'] = image
+                        images = self._search_images_by_keywords(keywords, limit=5)
+
+                    if not images:
+                        # Fallback to the single image already in memory from places_df
+                        single = normalized_image_map.get(key)
+                        if single and not (not isinstance(single, list) and pd.isna(single)):
+                            images = [single]
+
+                    if not images:
+                        images = ['default' + str(random.randint(1, 7)) + '.webp']
+
+                    place['images'] = images
 
             # Parent level: all images for the main destination. The destination
             # is usually a city (not a row in `places`), so fall back to the
@@ -840,6 +870,7 @@ class ItenaryRecommendationSystem:
             # Done BEFORE save_new_places so newly-inserted rows carry the same
             # coordinates that go out in the response.
             self._attach_lat_long(itinerary)
+            self._compute_travel_times(itinerary)
             self._attach_db_fields(itinerary)
 
             if start_date:
@@ -873,7 +904,6 @@ class ItenaryRecommendationSystem:
                 'token_usage': token_usage,
                 'data': {
                     'detailed_itinerary': itinerary,
-                    'places': places.to_dict(orient='records')
                 }
             }
 
@@ -984,7 +1014,7 @@ class ItenaryRecommendationSystem:
         if self.places_df is None or self.places_df.empty:
             return
         db_lookup = {
-            str(r.get("name", "")).strip().lower(): r
+            str(r.get("placename") or r.get("name", "")).strip().lower(): r
             for r in self.places_df.to_dict(orient="records")
         }
         for day in itinerary.get("itinerary", []):
@@ -1003,8 +1033,19 @@ class ItenaryRecommendationSystem:
                 # UI-only fields — never in the prompt, attached here for the frontend
                 if db.get("google_maps_uri"):
                     place["google_maps_uri"] = db["google_maps_uri"]
-                if db.get("google_photo_refs"):
-                    place["google_photo_refs"] = db["google_photo_refs"]
+
+                if db.get("full_address"):
+                    place["full_address"] = db["full_address"]
+                if db.get("good_for_children") is not None:
+                    place["good_for_children"] = db["good_for_children"]
+                if db.get("accessibility"):
+                    place["accessibility"] = db["accessibility"]
+                # Extra detail fields for place detail screen
+                place["editorial_summary"] = db.get("editorial_summary") or ""
+                place["review_summary"] = db.get("review_summary") or ""
+                place["short_formatted_address"] = db.get("short_formatted_address") or ""
+                place["google_rating"] = db.get("google_rating")
+                place["google_rating_count"] = db.get("google_rating_count")
 
     def _attach_lat_long(self, itinerary):
         """Populate `lat`/`lon`/`full_address` on every place, restaurant and
@@ -1036,10 +1077,45 @@ class ItenaryRecommendationSystem:
         for day in itinerary.get('itinerary', []):
             for place in day.get('places_to_visit', []):
                 apply(place, 'places', default_hint)
-            for rest in day.get('restaurants', []):
-                apply(rest, 'restaurants', default_hint)
-            for hotel in day.get('hotels', []):
-                apply(hotel, 'hotels', default_hint)
+            for meal in day.get('meals', {}).values():
+                if isinstance(meal, dict):
+                    apply(meal, 'restaurants', default_hint)
+        for hotel in itinerary.get('hotels', []):
+            apply(hotel, 'hotels', default_hint)
+
+    def _compute_travel_times(self, itinerary):
+        """Overwrite LLM-guessed travel_from_prev with real haversine estimates.
+        Must run after _attach_lat_long so lat/lon are already set."""
+        from math import radians, sin, cos, sqrt, atan2
+
+        def haversine(lat1, lon1, lat2, lon2):
+            R = 6371
+            dlat = radians(lat2 - lat1)
+            dlon = radians(lon2 - lon1)
+            a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+            return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+
+        for day in itinerary.get('itinerary', []):
+            places = day.get('places_to_visit', [])
+            for i, place in enumerate(places):
+                if i == 0:
+                    place['travel_from_prev'] = None
+                    continue
+                prev = places[i - 1]
+                try:
+                    dist_km = haversine(
+                        float(prev['lat']), float(prev['lon']),
+                        float(place['lat']), float(place['lon'])
+                    )
+                    mins = max(5, int(dist_km / 30 * 60))
+                    mode = 'walking' if dist_km < 1.5 else 'auto' if dist_km < 4 else 'cab'
+                    place['travel_from_prev'] = {
+                        'duration_mins': mins,
+                        'mode': mode,
+                        'note': f'~{mins} min by {mode} from {prev["name"]}'
+                    }
+                except (TypeError, KeyError, ValueError):
+                    pass
 
     def _attach_weather(self, itinerary, start_date_str):
         """Attach per-place weather to every place_to_visit using its lat/lon.
@@ -1120,10 +1196,10 @@ class ItenaryRecommendationSystem:
         # Split the preferred_location on comma and strip spaces
         location_parts = [part.strip() for part in preferred_location.split(",")]
 
-        # Step 1: Try to match on city first
+        # Step 1: Try to match on city first (exact match to avoid e.g. "goa" matching "goalpara")
         city_matches = top_places[
             top_places['city'].str.lower().apply(
-                lambda city: any(part in str(city).lower() for part in location_parts)
+                lambda city: any(part == str(city).lower() for part in location_parts)
             )
         ]
 
@@ -1131,10 +1207,10 @@ class ItenaryRecommendationSystem:
             # If there are city matches, use them only
             top_places = city_matches.copy()
         else:
-            # Otherwise fall back to matching by state
+            # Otherwise fall back to matching by state (exact match)
             top_places = top_places[
                 top_places['state'].str.lower().apply(
-                    lambda state: any(part in str(state).lower() for part in location_parts) )
+                    lambda state: any(part == str(state).lower() for part in location_parts) )
             ].copy()
 
         # Calculate average rating for all restaurants (or set a constant)
@@ -1757,18 +1833,20 @@ class ItenaryRecommendationSystem:
         4b. Only if the destination genuinely cannot fill {user_preferences['trip_duration']} days even after adding day-trips and nearby attractions: still output all {user_preferences['trip_duration']} days, but set the top-level `notes` field to a short sentence telling the user the destination is comfortably covered in fewer days (state the recommended number) and suggesting optional add-ons. If {user_preferences['trip_duration']} days fits well, set `notes` to "".
         5. Each day must include:
           - 2–3 geographically close places to visit.
-          - 2–3 restaurants (match cuisine and location).
-          - 2–3 hotels (low, mid, and high budget options).
+          - Exactly 3 meal slots: breakfast, lunch, and dinner (each linked to the nearest place of the day).
+          - No hotels inside the day — hotels are specified ONCE at the trip level (see rule 8).
         6. For each place, include:
-          - `name`, `location`, `reason`, `activities`, `rating`, estimated visit time (e.g., “1.5–2 hours”), and `opening_hours`.
-          - `opening_hours`: typical operating hours as a short string (e.g., “6:00 AM – 8:00 PM”, “Open 24 hours”, “Tue–Sun: 9:00 AM – 5:00 PM”). Use your knowledge for well-known places; if genuinely unknown, use “Check locally”.
-          - `rating` must be the place’s rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. “4.5”).
-        7. For each restaurant, include:
-          - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
-          - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
-        8. For each hotel, include:
-          - `name`, `type`, `price_range`, `rating`, `location`, `reason`, and a `link` (either from dataset or generated if missing).
-          - If user budget is available, ensure the hotel fits within the budget range: low (₹1000–₹3000), mid (₹3000–₹8000), high (₹8000+). If no budget is specified, select a range of hotel types.
+          - `name`, `location`, `reason`, `activities`, `rating`, estimated visit time (e.g., "1.5–2 hours"), `opening_hours`, `suggested_start_time`, and `travel_from_prev`.
+          - `opening_hours`: typical operating hours as a short string (e.g., "6:00 AM – 8:00 PM", "Open 24 hours", "Tue–Sun: 9:00 AM – 5:00 PM"). Use your knowledge for well-known places; if genuinely unknown, use "Check locally".
+          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. "4.5").
+          - `suggested_start_time`: the recommended arrival time at this place (e.g., "9:00 AM"). Derive it from the previous place's `suggested_start_time` + `duration` + estimated travel time. For the first place of the day, start at a sensible time (e.g., "9:00 AM" or "8:30 AM" for early-closing places).
+          - `travel_from_prev`: set to `null` for the very first place of each day (travel from hotel). For all subsequent places, provide `{{ "duration_mins": <int>, "mode": "<walking|auto|cab>", "note": "<human-readable string>" }}`. Use walking for <1.5 km, auto for 1.5–4 km, cab for >4 km. Estimate duration at 30 km/h average for city travel.
+        7. For each meal slot, include:
+          - `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place` (the closest place to visit that day), and `reason`.
+          - Slot meals contextually: breakfast near the first place of the day, lunch near the midday place, dinner near the last place or a popular evening area.
+          - If user budget is available, choose restaurants within that budget. Otherwise choose based on location and meal type.
+        8. Hotels are specified ONCE for the entire trip (not per day). Provide exactly 3 hotel options — one budget, one mid-range, one luxury — at the top level of the JSON (inside the root object, NOT inside any day). Each hotel must include `from_day` and `to_day` to indicate which nights it covers. For a single-city trip this is day 1 to day {user_preferences['trip_duration']}. For multi-city trips, split hotels by city with appropriate `from_day`/`to_day` ranges. Each hotel includes: `name`, `type` ("budget"|"mid"|"luxury"), `price_range` (per night), `rating`, `location`, `reason`, `from_day`, `to_day`, `link`.
+          - If user budget is available, ensure the mid option fits within the budget range: low (₹1000–₹3000/night), mid (₹3000–₹8000/night), high (₹8000+/night). If no budget is specified, select a balanced range.
         9. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
         10. Avoid repeating places, hotels, or restaurants on different days.
         11. Keep the travel flow linear — do not plan A → B → A routes.
@@ -1783,17 +1861,17 @@ class ItenaryRecommendationSystem:
         14. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
         15. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
         16. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
-        17. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        17. Always generate a full response — no placeholder text like "TBD" or "N/A".
         18. If budget is provided in the payload, ensure hotels and restaurants fall within it. Otherwise, choose budget automatically based on destination and travel group type.
         19. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on:
           - places should be from indian_travel_places dataset
-          - user’s `places_of_interest`
+          - user's `places_of_interest`
           - preferred activities
           - travel group type
           - food preferences
           - user location (for budget-friendly or closer alternatives)
           - trip type (Beach, mountain, hill station, Religious site, Nature etc.)
-        20. Don’t add NaN if any image or name is not available. Just leave it blank.
+        20. Don't add NaN if any image or name is not available. Just leave it blank.
 
         ---
 
@@ -1807,6 +1885,8 @@ class ItenaryRecommendationSystem:
           "itinerary": [
             {{
               "day": 1,
+              "theme": "Short day theme (e.g. Heritage & Beaches)",
+              "day_summary": "One-line summary of the day's flow (e.g. Fort Aguada → Calangute Beach → seafood dinner at sunset)",
               "places_to_visit": [
                 {{
                   "name": "Place Name",
@@ -1815,30 +1895,90 @@ class ItenaryRecommendationSystem:
                   "activities": ["Activity 1", "Activity 2"],
                   "rating": "X.X",
                   "opening_hours": "9:00 AM – 6:00 PM",
-                  "duration": "1.5–2 hours"
+                  "duration": "1.5–2 hours",
+                  "suggested_start_time": "9:00 AM",
+                  "travel_from_prev": null
+                }},
+                {{
+                  "name": "Second Place Name",
+                  "location": "City, State",
+                  "reason": "...",
+                  "activities": ["Activity 1"],
+                  "rating": "X.X",
+                  "opening_hours": "10:00 AM – 6:00 PM",
+                  "duration": "2–2.5 hours",
+                  "suggested_start_time": "11:30 AM",
+                  "travel_from_prev": {{
+                    "duration_mins": 20,
+                    "mode": "cab",
+                    "note": "~20 min by cab from Place Name"
+                  }}
                 }}
               ],
-              "restaurants": [
-                {{
+              "meals": {{
+                "breakfast": {{
                   "name": "Restaurant Name",
                   "cuisine": "Cuisine Type",
-                  "approx_cost": "₹XXX",
+                  "approx_cost": "₹XXX–₹XXX",
                   "rating": "X.X",
                   "location": "Area Name",
-                  "reason": "Matches your food preference: {user_preferences['food_preferences']}"
-                }}
-              ],
-              "hotels": [
-                {{
-                  "name": "Hotel Name",
-                  "type": "Hotel Type",
-                  "price_range": "₹XXX",
+                  "near_place": "Place Name (the closest place to visit this day)",
+                  "reason": "Quick breakfast near your morning stop"
+                }},
+                "lunch": {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX–₹XXX",
                   "rating": "X.X",
-                  "location": "City",
-                  "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
-                  "link": "Add valid Page URL from hotel dataset or generated link"
+                  "location": "Area Name",
+                  "near_place": "Place Name",
+                  "reason": "Matches your food preference: {user_preferences['food_preferences']}"
+                }},
+                "dinner": {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX–₹XXX",
+                  "rating": "X.X",
+                  "location": "Area Name",
+                  "near_place": "Place Name",
+                  "reason": "Great evening dining near your last stop"
                 }}
-              ]
+              }}
+            }}
+          ],
+          "hotels": [
+            {{
+              "name": "Budget Hotel Name",
+              "type": "budget",
+              "price_range": "₹1,000–₹3,000/night",
+              "rating": "X.X",
+              "location": "City, State",
+              "reason": "Affordable option, central to Day 1–{user_preferences['trip_duration']} places. Good for {user_preferences['travel_group_type']}",
+              "from_day": 1,
+              "to_day": {user_preferences['trip_duration']},
+              "link": "Add valid page URL from hotel dataset or generated link"
+            }},
+            {{
+              "name": "Mid-range Hotel Name",
+              "type": "mid",
+              "price_range": "₹3,000–₹8,000/night",
+              "rating": "X.X",
+              "location": "City, State",
+              "reason": "Good value, near key attractions",
+              "from_day": 1,
+              "to_day": {user_preferences['trip_duration']},
+              "link": "Add valid page URL from hotel dataset or generated link"
+            }},
+            {{
+              "name": "Luxury Hotel Name",
+              "type": "luxury",
+              "price_range": "₹8,000+/night",
+              "rating": "X.X",
+              "location": "City, State",
+              "reason": "Premium experience for {user_preferences['travel_group_type']}",
+              "from_day": 1,
+              "to_day": {user_preferences['trip_duration']},
+              "link": "Add valid page URL from hotel dataset or generated link"
             }}
           ],
           "name": "Place Name",
@@ -1936,18 +2076,20 @@ class ItenaryRecommendationSystem:
         7. If datasets do not have enough entries, **use GenAI knowledge** to fill missing places, restaurants, or hotels.
         8. Each day must include:
           - 2–3 geographically close places to visit (including any must-include places assigned to that day).
-          - 2–3 restaurants (match cuisine and location).
-          - 2–3 hotels (low, mid, and high budget options).
+          - Exactly 3 meal slots: breakfast, lunch, and dinner (each linked to the nearest place of the day).
+          - No hotels inside the day — hotels are specified ONCE at the trip level (see rule 11).
         9. For each place, include:
-          - `name`, `location`, `reason`, `activities`, `rating`, estimated visit time (e.g., “1.5–2 hours”), and `opening_hours`.
-          - `opening_hours`: typical operating hours as a short string (e.g., “6:00 AM – 8:00 PM”, “Open 24 hours”, “Tue–Sun: 9:00 AM – 5:00 PM”). Use your knowledge for well-known places; if genuinely unknown, use “Check locally”.
-          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. “4.5”).
-        10. For each restaurant, include:
-          - `name`, `cuisine`, `approx_cost`, `rating`, `location`, and a short reason related to food preference.
-          - If user budget is available, choose restaurants that fall within that budget. If not, choose automatically based on location and meal type.
-        11. For each hotel, include:
-          - `name`, `type`, `price_range`, `rating`, `location`, `reason`, and a `link` (either from dataset or generated if missing).
-          - If user budget is available, ensure the hotel fits within the budget range: low (₹1000–₹3000), mid (₹3000–₹8000), high (₹8000+). If no budget is specified, select a range of hotel types.
+          - `name`, `location`, `reason`, `activities`, `rating`, estimated visit time (e.g., "1.5–2 hours"), `opening_hours`, `suggested_start_time`, and `travel_from_prev`.
+          - `opening_hours`: typical operating hours as a short string (e.g., "6:00 AM – 8:00 PM", "Open 24 hours", "Tue–Sun: 9:00 AM – 5:00 PM"). Use your knowledge for well-known places; if genuinely unknown, use "Check locally".
+          - `rating` must be the place's rating from the Recommended Places dataset when available; otherwise use a realistic rating based on your knowledge (e.g. "4.5").
+          - `suggested_start_time`: the recommended arrival time at this place. Derive from previous place's start_time + duration + travel. For the first place of the day, use a sensible time (e.g., "9:00 AM").
+          - `travel_from_prev`: null for the first place of each day. For subsequent places: `{{ "duration_mins": <int>, "mode": "<walking|auto|cab>", "note": "<string>" }}`. Walking <1.5 km, auto 1.5–4 km, cab >4 km.
+        10. For each meal slot, include:
+          - `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, and `reason`.
+          - Slot contextually: breakfast near first place, lunch near midday place, dinner near last place or popular evening area.
+          - If user budget is available, choose restaurants within that budget. Otherwise choose based on location and meal type.
+        11. Hotels are specified ONCE for the entire trip (not per day). Provide exactly 3 hotel options — budget, mid, luxury — at the top level of the JSON (NOT inside any day). Include `from_day` and `to_day` for each. Each hotel: `name`, `type` ("budget"|"mid"|"luxury"), `price_range` (per night), `rating`, `location`, `reason`, `from_day`, `to_day`, `link`.
+          - Budget range: low (₹1000–₹3000/night), mid (₹3000–₹8000/night), high (₹8000+/night).
         12. On Day 1 and the final day, choose places/hotels closer to the airport or train station.
         13. Avoid repeating places, hotels, or restaurants on different days.
         14. Keep the travel flow linear — do not plan A → B → A routes.
@@ -1962,7 +2104,7 @@ class ItenaryRecommendationSystem:
         17. Do NOT include comments, markdown, or any explanation in the response — only JSON output.
         18. Do NOT add trailing commas — not after the last item in an array or the last key in an object.
         19. If required fields are missing in the datasets, **generate realistic replacements using GenAI knowledge**, ensuring the format and tone match the examples.
-        20. Always generate a full response — no placeholder text like “TBD” or “N/A”.
+        20. Always generate a full response — no placeholder text like "TBD" or "N/A".
         21. At the end of the JSON, include a `similar_places` list — destinations similar to the main place, based on the user's `places_of_interest`, preferred activities, travel group type, food preferences, user location, and trip type. Places should be from the indian_travel_places dataset.
         22. Don't add NaN if any image or name is not available. Just leave it blank.
 
@@ -1978,6 +2120,8 @@ class ItenaryRecommendationSystem:
           "itinerary": [
             {{
               "day": 1,
+              "theme": "Short day theme (e.g. Heritage & Beaches)",
+              "day_summary": "One-line summary of the day's flow",
               "places_to_visit": [
                 {{
                   "name": "Place Name",
@@ -1986,30 +2130,90 @@ class ItenaryRecommendationSystem:
                   "activities": ["Activity 1", "Activity 2"],
                   "rating": "X.X",
                   "opening_hours": "9:00 AM – 6:00 PM",
-                  "duration": "1.5–2 hours"
+                  "duration": "1.5–2 hours",
+                  "suggested_start_time": "9:00 AM",
+                  "travel_from_prev": null
+                }},
+                {{
+                  "name": "Second Place Name",
+                  "location": "City, State",
+                  "reason": "...",
+                  "activities": ["Activity 1"],
+                  "rating": "X.X",
+                  "opening_hours": "10:00 AM – 6:00 PM",
+                  "duration": "2–2.5 hours",
+                  "suggested_start_time": "11:30 AM",
+                  "travel_from_prev": {{
+                    "duration_mins": 20,
+                    "mode": "cab",
+                    "note": "~20 min by cab from Place Name"
+                  }}
                 }}
               ],
-              "restaurants": [
-                {{
+              "meals": {{
+                "breakfast": {{
                   "name": "Restaurant Name",
                   "cuisine": "Cuisine Type",
-                  "approx_cost": "₹XXX",
+                  "approx_cost": "₹XXX–₹XXX",
                   "rating": "X.X",
                   "location": "Area Name",
-                  "reason": "Matches your food preference: {user_preferences['food_preferences']}"
-                }}
-              ],
-              "hotels": [
-                {{
-                  "name": "Hotel Name",
-                  "type": "Hotel Type",
-                  "price_range": "₹XXX",
+                  "near_place": "Place Name",
+                  "reason": "Quick breakfast near your morning stop"
+                }},
+                "lunch": {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX–₹XXX",
                   "rating": "X.X",
-                  "location": "City",
-                  "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
-                  "link": "Add valid Page URL from hotel dataset or generated link"
+                  "location": "Area Name",
+                  "near_place": "Place Name",
+                  "reason": "Matches your food preference: {user_preferences['food_preferences']}"
+                }},
+                "dinner": {{
+                  "name": "Restaurant Name",
+                  "cuisine": "Cuisine Type",
+                  "approx_cost": "₹XXX–₹XXX",
+                  "rating": "X.X",
+                  "location": "Area Name",
+                  "near_place": "Place Name",
+                  "reason": "Great evening dining near your last stop"
                 }}
-              ]
+              }}
+            }}
+          ],
+          "hotels": [
+            {{
+              "name": "Budget Hotel Name",
+              "type": "budget",
+              "price_range": "₹1,000–₹3,000/night",
+              "rating": "X.X",
+              "location": "City, State",
+              "reason": "Affordable option, central to all days. Good for {user_preferences['travel_group_type']}",
+              "from_day": 1,
+              "to_day": {user_preferences['trip_duration']},
+              "link": "Add valid page URL from hotel dataset or generated link"
+            }},
+            {{
+              "name": "Mid-range Hotel Name",
+              "type": "mid",
+              "price_range": "₹3,000–₹8,000/night",
+              "rating": "X.X",
+              "location": "City, State",
+              "reason": "Good value, near key attractions",
+              "from_day": 1,
+              "to_day": {user_preferences['trip_duration']},
+              "link": "Add valid page URL from hotel dataset or generated link"
+            }},
+            {{
+              "name": "Luxury Hotel Name",
+              "type": "luxury",
+              "price_range": "₹8,000+/night",
+              "rating": "X.X",
+              "location": "City, State",
+              "reason": "Premium experience for {user_preferences['travel_group_type']}",
+              "from_day": 1,
+              "to_day": {user_preferences['trip_duration']},
+              "link": "Add valid page URL from hotel dataset or generated link"
             }}
           ],
           "name": "Place Name",

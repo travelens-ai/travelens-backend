@@ -82,10 +82,9 @@ def _json_default(o):
 
 
 def _prune_result_for_storage(result):
-    """Return a deep copy of the itinerary result with the bulky/derived parts
-    stripped out before persisting: `data.places` and
-    `data.detailed_itinerary.similar_places`. The caller's `result` (and the
-    in-memory cache) keep the full payload — only the stored copy is trimmed."""
+    """Return a deep copy of the itinerary result with bulky/derived parts
+    stripped before persisting: `data.detailed_itinerary.similar_places`.
+    The caller's `result` (and the in-memory cache) keep the full payload."""
     if not isinstance(result, dict):
         return result
     pruned = copy.deepcopy(result)
@@ -93,7 +92,6 @@ def _prune_result_for_storage(result):
     pruned.pop("token_usage", None)
     data = pruned.get("data")
     if isinstance(data, dict):
-        data.pop("places", None)
         detailed = data.get("detailed_itinerary")
         if isinstance(detailed, dict):
             detailed.pop("similar_places", None)
