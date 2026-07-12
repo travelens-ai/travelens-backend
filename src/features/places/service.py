@@ -322,27 +322,29 @@ def query_trending(lat=None, lon=None):
 
 
 def query_nearby(lat, lon):
-    # Filter city coords cache (831 entries) — no table scan needed.
+    # Start at 150 km; expand to 250 km if fewer than 5 results (sparse regions).
     # Lower bound 1 km excludes the user's own city (exact match is 0 km).
     # Many cities have duplicate/placeholder coords so we also post-filter
     # any result row whose stored coords are < 1 km from the user.
-    nearby = [
-        name for name, (clat, clon) in _city_coords_cache.items()
-        if 1 <= haversine(lat, lon, clat, clon) <= 150
-    ]
-    if not nearby:
-        return []
-    rows = _city_aggregate_query(city_filter=nearby, limit=50)
-    # Sort by distance first, then rating.
-    coords = _city_coords_cache
-    rows.sort(key=lambda r: (
-        haversine(lat, lon, *coords.get(r['city'].lower(), (lat, lon))),
-        -(r['avg_rating'] or 0),
-    ))
-    rows = _dedup_cities(rows)
-    # Post-filter: drop any row whose coords sit < 1 km from user (home city or same-coord dups)
-    rows = [r for r in rows if r.get('lat') is None or
-            haversine(lat, lon, r['lat'], r['lon']) >= 1]
+    rows = []
+    for max_km in (150, 250):
+        nearby = [
+            name for name, (clat, clon) in _city_coords_cache.items()
+            if 1 <= haversine(lat, lon, clat, clon) <= max_km
+        ]
+        if not nearby:
+            continue
+        rows = _city_aggregate_query(city_filter=nearby, limit=50)
+        coords = _city_coords_cache
+        rows.sort(key=lambda r: (
+            haversine(lat, lon, *coords.get(r['city'].lower(), (lat, lon))),
+            -(r['avg_rating'] or 0),
+        ))
+        rows = _dedup_cities(rows)
+        rows = [r for r in rows if r.get('lat') is None or
+                haversine(lat, lon, r['lat'], r['lon']) >= 1]
+        if len(rows) >= 5 or max_km == 250:
+            break
     return _attach_images_and_activities(rows[:10])
 
 
