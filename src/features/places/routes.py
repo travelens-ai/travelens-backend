@@ -68,11 +68,11 @@ def get_places():
 
     try:
         if place_type == "popular":
-            result = places_service.query_popular()
+            result = places_service.query_popular(lat=lat, lon=long)
             return jsonify({"status": "success", "places": with_image_urls(result)}), 200
 
         if place_type == "trending":
-            result = places_service.query_trending()
+            result = places_service.query_trending(lat=lat, lon=long)
             return jsonify({"status": "success", "places": with_image_urls(result)}), 200
 
         if place_type == "nearby":

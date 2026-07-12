@@ -269,10 +269,25 @@ def _dedup_cities(rows):
     return list(seen.values())
 
 
-def _curated_city_cards(city_state_list, n=10):
+def _nearest_city(lat, lon):
+    """Return the dedup-key of the closest city in the coords cache."""
+    if not _city_coords_cache:
+        return None
+    return min(
+        _city_coords_cache,
+        key=lambda name: haversine(lat, lon, *_city_coords_cache[name]),
+    )
+
+
+def _curated_city_cards(city_state_list, n=10, exclude_city_key=None):
     """Build city cards from a curated (city, state) list by looking up the
-    city aggregate from the DB. Returns n randomly sampled entries."""
-    sample = random.sample(city_state_list, min(n * 2, len(city_state_list)))
+    city aggregate from the DB. Returns n randomly sampled entries.
+    exclude_city_key: dedup key of user's current city — excluded from results."""
+    pool = city_state_list
+    if exclude_city_key:
+        pool = [(c, s) for c, s in city_state_list
+                if _city_dedup_key(c) != exclude_city_key]
+    sample = random.sample(pool, min(n * 2, len(pool)))
     city_names = [c.lower() for c, _ in sample]
     rows = _city_aggregate_query(city_filter=city_names, limit=len(city_names) + 5)
     rows = _attach_images_and_activities(rows)
@@ -296,12 +311,14 @@ def _state_diverse(rows, max_per_state=2, total=10):
     return result
 
 
-def query_popular():
-    return _curated_city_cards(_POPULAR_CITIES, n=10)
+def query_popular(lat=None, lon=None):
+    excl = _city_dedup_key(_nearest_city(lat, lon)) if lat is not None and lon is not None else None
+    return _curated_city_cards(_POPULAR_CITIES, n=10, exclude_city_key=excl)
 
 
-def query_trending():
-    return _curated_city_cards(_TRENDING_CITIES, n=10)
+def query_trending(lat=None, lon=None):
+    excl = _city_dedup_key(_nearest_city(lat, lon)) if lat is not None and lon is not None else None
+    return _curated_city_cards(_TRENDING_CITIES, n=10, exclude_city_key=excl)
 
 
 def query_nearby(lat, lon):
