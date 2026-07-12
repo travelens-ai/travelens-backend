@@ -511,13 +511,16 @@ def query_trending(lat=None, lon=None):
 def query_nearby(lat, lon):
     # Start at 150 km; expand to 250 km if fewer than 5 results (sparse regions).
     # Lower bound 1 km excludes the user's own city (exact match is 0 km).
+    # Name-based exclusion also catches spelling variants (e.g. Bengaluru vs Bangalore).
     # Many cities have duplicate/placeholder coords so we also post-filter
     # any result row whose stored coords are < 1 km from the user.
+    home_key = _city_dedup_key(_nearest_city(lat, lon))
     rows = []
     for max_km in (150, 250):
         nearby = [
             name for name, (clat, clon) in _city_coords_cache.items()
             if 1 <= haversine(lat, lon, clat, clon) <= max_km
+            and _city_dedup_key(name) != home_key
         ]
         if not nearby:
             continue
@@ -537,9 +540,12 @@ def query_nearby(lat, lon):
 
 def query_weekend(lat, lon):
     # 150–350 km: far enough to feel like a trip, close enough for a weekend.
+    # Name-based exclusion guards against the home city appearing via spelling variants.
+    home_key = _city_dedup_key(_nearest_city(lat, lon))
     weekend = [
         name for name, (clat, clon) in _city_coords_cache.items()
         if 150 < haversine(lat, lon, clat, clon) <= 350
+        and _city_dedup_key(name) != home_key
     ]
     if not weekend:
         return []
