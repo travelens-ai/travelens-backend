@@ -1217,11 +1217,12 @@ class ItenaryRecommendationSystem:
             lambda x: self.weighted_place_rating(x, C), axis=1
         )
 
-        # Normalize scores to a range of 0-1
+        # Normalize scores to a range of 0-1; guard against single-row or uniform-score sets
         for column in ['activity_score', 'trip_type_score', 'rating_score']:
             min_val = top_places[column].min()
             max_val = top_places[column].max()
-            top_places[column] = (top_places[column] - min_val) / (max_val - min_val)
+            rng = max_val - min_val
+            top_places[column] = (top_places[column] - min_val) / rng if rng > 0 else 1.0
 
         # Calculate final output score
         top_places['final_score'] = (
@@ -1842,24 +1843,24 @@ No trailing commas. No NaN — use "" for missing strings, null for missing numb
 
 A good trip has rhythm. Not every day should be equally packed.
 
-Day pacing guide:
-- 1–2 day trip: reasonably full days, not exhausting.
-- 3 day trip: Day 1 = lighter arrival/orientation, Day 2 = full exploration, Day 3 = relaxed morning + departure-friendly afternoon.
-- 4 day trip: Day 1 = light arrival, Day 2 = full, Day 3 = relaxed/leisure (1–2 places, long lunch, slow afternoon), Day 4 = easy departure morning.
-- 5 day trip: Day 1 = light, Day 2 = full, Day 3 = full, Day 4 = relaxed leisure, Day 5 = easy departure day.
+Day pacing guide — schedule by available time, not by a fixed place count:
+- A day runs roughly 9:00 AM to 8:00 PM (11 hours). Deducting meals (~3 hrs total) leaves ~8 hrs for places + travel.
+- ALL days — including Day 1 and the final day — are FULL days. Travelers may arrive the night before or depart late at night, so assume every day is fully available for sightseeing.
+- Full day: use the full ~8 hrs. Pack as many places as genuinely fit without rushing — could be 3, 4, or more for short/nearby attractions.
+- Relaxed day (only applicable for 5+ day trips, one middle day): ~5–6 hrs for sightseeing. Choose fewer or shorter-duration places, but still fill the available time — do NOT limit to 1 place.
 - 6+ day trips: alternate full and relaxed days. Never 3 packed days in a row.
-- A "relaxed day" means 1–2 places max, a long unhurried lunch, maybe an evening stroll.
+- Never leave large idle gaps. If time remains after the last planned place, add one more nearby attraction.
 
 Travel is real. A 20-min cab ride + finding parking + walking in = 35 min gone.
 
-## Meal timing — add suggested_time to every restaurant
+## Meal timing — 3 meals every day, in the `meals` dict
 
-Each day has 2–3 restaurants in the `restaurants` array. Think of them as breakfast, lunch, dinner in order.
-- First restaurant (breakfast): near the hotel or on the way. Typically 7:30–8:30 AM. Set `suggested_time` e.g. "8:00 AM".
-- Second restaurant (lunch): after 2–3 hours of morning sightseeing. Typically 12:30–1:30 PM. Derive honestly from the morning flow.
-- Third restaurant (dinner): after the last place winds down. Typically 7:30–9:00 PM. Set a realistic evening time.
+Each day must have exactly 3 entries in the `meals` dict: `breakfast`, `lunch`, and `dinner`.
+- breakfast: near the hotel or on the way. Typically 7:30–8:30 AM.
+- lunch: after 2–3 hours of morning sightseeing. Typically 12:30–1:30 PM. Derive honestly from the morning flow.
+- dinner: after the last place winds down. Typically 7:30–9:00 PM. Set a realistic evening time.
 
-`suggested_time` is mandatory on every restaurant. Derive from the actual day timeline — do not use a fixed template.
+`suggested_time` and `duration` are mandatory on every meal. Derive `suggested_time` from the actual day timeline — do not use a fixed template.
 
 ## Day count (initial generation — non-negotiable)
 
@@ -1896,17 +1897,18 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
 1. The final output must be 100% valid JSON. Strictly no broken or partial JSON.
 2. 🚨 DAY COUNT IS MANDATORY: The `itinerary` array must contain exactly {trip_duration} day objects (day 1 through day {trip_duration}). Never stop early. This is non-negotiable.
 3. You must include all {user_preferences['suggested_places']} in the itinerary. If including them requires more than {trip_duration} days, still produce exactly {trip_duration} days (initial generation has fixed days).
-4. To fill all {trip_duration} days, use every relevant place from the Recommended Places dataset first, then your own travel knowledge to add more real, distinct nearby attractions so every day is full (2–3 places). Do not repeat places across days.
+4. To fill all {trip_duration} days, use every relevant place from the Recommended Places dataset first, then your own travel knowledge to add more real, distinct nearby attractions so every day's available time is filled. Add an extra place whenever the day's schedule has remaining time before dinner. Do not repeat places across days.
 4b. If the destination genuinely cannot fill {trip_duration} days even after adding day-trips: still output all {trip_duration} days, but set `notes` to a short advisory suggesting the recommended number of days. If {trip_duration} days fits well, set `notes` to "".
-5. Each day must include: 2–3 geographically close places and 3 meal slots (breakfast/lunch/dinner in `meals` dict). Hotels go at the TOP LEVEL, not inside days.
+5. Each day must include: as many geographically close places as fit within the day's available time (see pacing guide) — minimum 2, no fixed upper limit. Always include exactly 3 meal slots (breakfast/lunch/dinner in the `meals` dict). Hotels go at the TOP LEVEL, not inside days.
 6. For each place include: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_start_time`, `travel_from_prev`.
    - `opening_hours`: typical operating hours (e.g. "9:00 AM – 6:00 PM"). Use your knowledge; if unknown, "Check locally".
    - `rating`: from dataset when available; otherwise a realistic value.
    - `suggested_start_time`: derived from previous place start + duration + travel time. Be honest about travel time.
    - `travel_from_prev`: null for first place of the day. For others: {{"duration_mins": int, "mode": "walking|auto|cab", "note": "human string"}}. Walking < 1.5 km, auto 1.5–4 km, cab > 4 km.
    - Do not suggest a place on a day it is regularly closed (use start_date to calculate day-of-week).
-7. For each meal include: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`.
+7. For each meal include: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`.
    - `suggested_time` is mandatory — derive from the day's actual time flow (see system instructions).
+   - `duration`: typical time spent (e.g. "30–45 mins" for breakfast, "45–60 mins" for lunch/dinner).
    - `near_place`: the closest place being visited that day.
    - Choose restaurants matching food preferences and budget.
 8. Top-level `hotels`: exactly 3 options (budget / mid / luxury) for the whole trip. Include: `name`, `type`, `price_range`, `rating`, `location`, `reason`, `from_day`, `to_day`, `link`.
@@ -1960,7 +1962,8 @@ Hotels go at the TOP LEVEL (not inside days) — 3 options covering budget/mid/l
           "location": "Area Name",
           "near_place": "Closest place to visit that day",
           "reason": "Matches your food preference: {user_preferences['food_preferences']}",
-          "suggested_time": "8:00 AM"
+          "suggested_time": "8:00 AM",
+          "duration": "30–45 mins"
         }},
         "lunch": {{
           "name": "Restaurant Name",
@@ -1970,7 +1973,8 @@ Hotels go at the TOP LEVEL (not inside days) — 3 options covering budget/mid/l
           "location": "Area Name",
           "near_place": "Closest place at midday",
           "reason": "Good spot for lunch near your midday stop",
-          "suggested_time": "1:00 PM"
+          "suggested_time": "1:00 PM",
+          "duration": "45–60 mins"
         }},
         "dinner": {{
           "name": "Restaurant Name",
@@ -1980,7 +1984,8 @@ Hotels go at the TOP LEVEL (not inside days) — 3 options covering budget/mid/l
           "location": "Area Name",
           "near_place": "Closest place from last activity",
           "reason": "Relaxed dinner after the day's sightseeing",
-          "suggested_time": "8:00 PM"
+          "suggested_time": "8:00 PM",
+          "duration": "60–90 mins"
         }}
       }}
     }}

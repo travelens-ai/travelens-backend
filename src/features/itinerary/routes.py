@@ -164,7 +164,7 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
 
         for slot in ("breakfast", "lunch", "dinner"):
             meal = meals.get(slot)
-            if meal:
+            if meal and isinstance(meal, dict) and meal.get("name"):
                 yield {"event": "meal", "day": day_no, "slot": slot, "item": meal}
 
     # 5. Similar places, one per event.
