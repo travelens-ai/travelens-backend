@@ -1,10 +1,86 @@
 import math
+import random
 import threading
+import collections
 
 from core.db import new_connection
 
 _city_coords_cache = {}
 _city_coords_loaded = False
+
+# Curated Gen Z popular destinations — aspirational, diverse, all have good data in DB.
+# Randomly sampled each request so the list feels alive without needing real trending data.
+_POPULAR_CITIES = [
+    ('panaji',       'Goa'),
+    ('jaipur',       'Rajasthan'),
+    ('manali',       'Himachal Pradesh'),
+    ('rishikesh',    'Uttarakhand'),
+    ('udaipur',      'Rajasthan'),
+    ('hampi',        'Karnataka'),
+    ('darjeeling',   'West Bengal'),
+    ('puducherry',   'Puducherry'),
+    ('coorg',        'Karnataka'),
+    ('jaisalmer',    'Rajasthan'),
+    ('varanasi',     'Uttar Pradesh'),
+    ('leh',          'Ladakh'),
+    ('amritsar',     'Punjab'),
+    ('shimla',       'Himachal Pradesh'),
+    ('gokarna',      'Karnataka'),
+    ('munnar',       'Kerala'),
+    ('jodhpur',      'Rajasthan'),
+    ('pushkar',      'Rajasthan'),
+    ('dharamshala',  'Himachal Pradesh'),
+    ('gangtok',      'Sikkim'),
+    ('alappuzha',    'Kerala'),
+    ('ooty',         'Tamil Nadu'),
+    ('mahabaleshwar','Maharashtra'),
+    ('kasol',        'Himachal Pradesh'),
+    ('ziro',         'Arunachal Pradesh'),
+    ('mawlynnong',   'Meghalaya'),
+    ('tawang',       'Arunachal Pradesh'),
+    ('khajuraho',    'Madhya Pradesh'),
+    ('agra',         'Uttar Pradesh'),
+    ('haridwar',     'Uttarakhand'),
+]
+
+# Trending = buzzing right now — mix of viral + classic, slightly different pool.
+_TRENDING_CITIES = [
+    ('kasol',        'Himachal Pradesh'),
+    ('rishikesh',    'Uttarakhand'),
+    ('panaji',       'Goa'),
+    ('mcleod ganj',  'Himachal Pradesh'),
+    ('hampi',        'Karnataka'),
+    ('ziro',         'Arunachal Pradesh'),
+    ('gokarna',      'Karnataka'),
+    ('mawlynnong',   'Meghalaya'),
+    ('varkala',      'Kerala'),
+    ('tawang',       'Arunachal Pradesh'),
+    ('jaipur',       'Rajasthan'),
+    ('udaipur',      'Rajasthan'),
+    ('jaisalmer',    'Rajasthan'),
+    ('leh',          'Ladakh'),
+    ('chopta',       'Uttarakhand'),
+    ('darjeeling',   'West Bengal'),
+    ('coorg',        'Karnataka'),
+    ('puducherry',   'Puducherry'),
+    ('alibaug',      'Maharashtra'),
+    ('auli',         'Uttarakhand'),
+    ('munnar',       'Kerala'),
+    ('alappuzha',    'Kerala'),
+    ('khajuraho',    'Madhya Pradesh'),
+    ('nainital',     'Uttarakhand'),
+    ('varanasi',     'Uttar Pradesh'),
+]
+
+# Primary types that represent actual tourist destinations (not shops, temples, localities).
+TOURIST_TYPES = (
+    'tourist_attraction', 'historical_landmark', 'historical_place', 'national_park',
+    'beach', 'lake', 'park', 'museum', 'mountain_peak', 'hiking_area', 'scenic_spot',
+    'natural_feature', 'garden', 'zoo', 'amusement_park', 'wildlife_park', 'island',
+    'monument', 'castle', 'landmark', 'botanical_garden', 'nature_preserve',
+    'wildlife_refuge', 'aquarium', 'cultural_center', 'art_museum', 'history_museum',
+    'waterfall', 'resort_hotel',
+)
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -45,88 +121,210 @@ def load_city_coords():
     threading.Thread(target=_do_load, daemon=True).start()
 
 
-def _row_to_dict(row):
-    return {
-        "city": row.get("city"),
-        "state": row.get("state"),
-        "name": row.get("name"),
-        "type": row.get("type"),
-        "distance from airport": row.get("dist_airport"),
-        "distance from bus stand": row.get("dist_bus_stand"),
-        "distance from railway station": row.get("dist_railway"),
-        "rating": row.get("rating"),
-        "no of rating": row.get("num_ratings"),
-        "best month to visit": row.get("best_month"),
-        "famous activities": row.get("famous_activities"),
-        "prefer for friends": row.get("prefer_friends"),
-        "prefer for couple": row.get("prefer_couple"),
-        "prefer for family with children": row.get("prefer_family_children"),
-        "prefer for family without children": row.get("prefer_family_no_children"),
-        "famous activities with rating": row.get("famous_activities_rating"),
-        "image": row.get("image"),
-        "full_address": row.get("full_address"),
-        "google_rating": row.get("google_rating"),
-        "google_rating_count": row.get("google_rating_count"),
-        "google_maps_uri": row.get("google_maps_uri"),
-        "website_uri": row.get("website_uri"),
-        "phone_number": row.get("phone_number"),
-        "opening_hours": row.get("opening_hours"),
-        "place_types": row.get("place_types"),
-        "business_status": row.get("business_status"),
-    }
+def _city_aggregate_query(city_filter=None, limit=50):
+    """Aggregate tourist places by city and return city-level cards.
 
+    city_filter: optional list of lowercase city names to restrict the query
+    (used by nearby/weekend after haversine pre-filtering).
+    Returns list of dicts: city, state, lat, lon, place_count, avg_rating,
+    total_reviews, best_month. image/best_activities are filled in later by
+    _attach_images_and_activities().
+    """
+    placeholders = ','.join(['?' for _ in TOURIST_TYPES])
+    params = list(TOURIST_TYPES)
 
-def query_popular():
-    from features.itinerary.service import recommender
-    return recommender.get_popular_destination() or []
+    city_clause = ''
+    if city_filter:
+        city_placeholders = ','.join(['?' for _ in city_filter])
+        city_clause = f'AND LOWER(c.name) IN ({city_placeholders})'
+        params += city_filter  # already lowercased by caller
 
+    params.append(limit)
 
-def query_by_keyword(keyword, limit=10):
-    """Return city, state and place names that contain `keyword`
-    (case-insensitive). Exact matches sort first; ties are broken by source
-    priority (city > state > place) then alphabetically. LIKE wildcards in the
-    keyword are escaped so user input is matched literally."""
-    term = keyword.strip().lower()
-    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    like = "%" + escaped + "%"
-
-    # (table, type label, source-priority rank for tie-breaking)
-    sources = [("cities", "city", 0), ("states", "state", 1), ("places", "place", 2)]
+    sql = f"""
+        SELECT c.name AS city, s.name AS state,
+               CAST(c.lat AS float) AS lat, CAST(c.lon AS float) AS lon,
+               COUNT(p.id) AS place_count,
+               AVG(CAST(p.rating AS float)) AS avg_rating,
+               SUM(CAST(COALESCE(p.google_rating_count, 0) AS bigint)) AS total_reviews,
+               MAX(p.best_month) AS best_month
+        FROM places p
+        JOIN cities c ON p.city_id = c.id
+        JOIN states s ON c.state_id = s.id
+        WHERE (p.primary_type IN ({placeholders}) OR p.primary_type IS NULL)
+          AND p.rating IS NOT NULL
+          {city_clause}
+        GROUP BY c.name, s.name, c.lat, c.lon
+        HAVING COUNT(p.id) >= 2
+        ORDER BY total_reviews DESC, avg_rating DESC
+        OFFSET 0 ROWS FETCH NEXT (?) ROWS ONLY
+    """
 
     conn = new_connection()
     cursor = conn.cursor()
     try:
-        results = []
-        for table, type_label, rank in sources:
-            cursor.execute(
-                f"SELECT name FROM {table} WHERE name LIKE ?",
-                (like,),
-            )
-            for row in cursor.fetchall():
-                name = row[0]
-                results.append({
-                    "name": name,
-                    "type": type_label,
-                    "_exact": str(name).strip().lower() == term,
-                    "_rank": rank,
-                })
-
-        # Exact matches first, then source priority, then alphabetical.
-        results.sort(key=lambda r: (not r["_exact"], r["_rank"], str(r["name"]).lower()))
-
-        out = []
-        for r in results[:limit]:
-            out.append({"name": r["name"], "type": r["type"]})
-        return out
+        cursor.execute(sql, params)
+        rows = _cursor_to_dicts(cursor)
     finally:
         cursor.close()
         conn.close()
 
+    return [
+        {
+            'city': r['city'],
+            'state': r['state'],
+            'lat': r['lat'],
+            'lon': r['lon'],
+            'place_count': int(r['place_count']),
+            'avg_rating': round(float(r['avg_rating']), 2) if r['avg_rating'] else None,
+            'total_reviews': int(r['total_reviews']),
+            'best_month': r['best_month'] or '',
+            'image': '',
+            'best_activities': '',
+        }
+        for r in rows
+    ]
+
+
+def _attach_images_and_activities(city_rows):
+    """Enrich city rows with image and best_activities from the in-memory
+    places DataFrame (CSV-sourced, loaded by the recommender at startup)."""
+    try:
+        from features.itinerary.service import recommender
+        if recommender is None:
+            return city_rows
+        df = recommender.places_df
+    except Exception:
+        return city_rows
+
+    # Best image per city — top-rated place that has a non-empty image.
+    has_img = df[
+        df['image'].notna() & (df['image'].astype(str).str.strip() != '') &
+        df['city'].notna()
+    ]
+    img_map = (
+        has_img.sort_values('rating', ascending=False)
+               .drop_duplicates('city')
+               .set_index('city')['image']
+               .to_dict()
+    )
+    img_map_lower = {str(k).lower(): v for k, v in img_map.items()}
+
+    # Top 3 activity tags per city (most frequent across all its places).
+    act_col = 'famous activities'
+    act_map = {}
+    if act_col in df.columns:
+        for city_name, group in df[df['city'].notna()].groupby('city'):
+            counter = collections.Counter()
+            for val in group[act_col].dropna():
+                for act in str(val).split(','):
+                    act = act.strip()
+                    if act:
+                        counter[act] += 1
+            act_map[city_name.lower()] = ', '.join(a for a, _ in counter.most_common(3))
+
+    for row in city_rows:
+        key = str(row['city']).lower()
+        row['image'] = img_map_lower.get(key, '')
+        row['best_activities'] = act_map.get(key, '')
+
+    return city_rows
+
+
+_CITY_PREFIXES = ('new ', 'old ', 'north ', 'south ', 'east ', 'west ', 'greater ')
+
+def _city_dedup_key(name):
+    """Normalise city name for dedup — strip direction/qualifier prefixes so
+    'new delhi' and 'delhi' collapse to the same key."""
+    key = str(name).lower().strip()
+    for prefix in _CITY_PREFIXES:
+        if key.startswith(prefix):
+            key = key[len(prefix):]
+            break
+    return key.replace(' ', '')
+
+
+def _dedup_cities(rows):
+    """Remove duplicate cities (e.g. 'delhi' vs 'new delhi') by normalised key.
+    Keeps the entry with the higher place_count on collision."""
+    seen = {}
+    for row in rows:
+        key = _city_dedup_key(row['city'])
+        if key not in seen or (row.get('place_count') or 0) > (seen[key].get('place_count') or 0):
+            seen[key] = row
+    return list(seen.values())
+
+
+def _curated_city_cards(city_state_list, n=10):
+    """Build city cards from a curated (city, state) list by looking up the
+    city aggregate from the DB. Returns n randomly sampled entries."""
+    sample = random.sample(city_state_list, min(n * 2, len(city_state_list)))
+    city_names = [c.lower() for c, _ in sample]
+    rows = _city_aggregate_query(city_filter=city_names, limit=len(city_names) + 5)
+    rows = _attach_images_and_activities(rows)
+    # Preserve curated order (random.sample order) rather than review-count order.
+    order = {c.lower(): i for i, (c, _) in enumerate(sample)}
+    rows.sort(key=lambda r: order.get(str(r['city']).lower(), 999))
+    return rows[:n]
+
+
+def _state_diverse(rows, max_per_state=2, total=10):
+    """Cap results to `max_per_state` cities per state for diversity."""
+    state_counts = collections.Counter()
+    result = []
+    for row in rows:
+        state = row.get('state', '')
+        if state_counts[state] < max_per_state:
+            result.append(row)
+            state_counts[state] += 1
+        if len(result) >= total:
+            break
+    return result
+
+
+def query_popular():
+    return _curated_city_cards(_POPULAR_CITIES, n=10)
+
+
+def query_trending():
+    return _curated_city_cards(_TRENDING_CITIES, n=10)
+
+
+def query_nearby(lat, lon):
+    # Filter city coords cache (831 entries) — no table scan needed.
+    nearby = [
+        name for name, (clat, clon) in _city_coords_cache.items()
+        if haversine(lat, lon, clat, clon) <= 150
+    ]
+    if not nearby:
+        return []
+    rows = _city_aggregate_query(city_filter=nearby, limit=50)
+    # Sort by distance first, then rating.
+    coords = _city_coords_cache
+    rows.sort(key=lambda r: (
+        haversine(lat, lon, *coords.get(r['city'].lower(), (lat, lon))),
+        -(r['avg_rating'] or 0),
+    ))
+    rows = _dedup_cities(rows)
+    return _attach_images_and_activities(rows[:10])
+
+
+def query_weekend(lat, lon):
+    # 150–350 km: far enough to feel like a trip, close enough for a weekend.
+    weekend = [
+        name for name, (clat, clon) in _city_coords_cache.items()
+        if 150 < haversine(lat, lon, clat, clon) <= 350
+    ]
+    if not weekend:
+        return []
+    rows = _city_aggregate_query(city_filter=weekend, limit=50)
+    rows.sort(key=lambda r: -(r['avg_rating'] or 0))
+    rows = _dedup_cities(rows)
+    return _attach_images_and_activities(rows[:10])
+
 
 def query_popular_states(limit=10):
-    """Return the most popular states, ranked by the total number of ratings
-    across all places in each state (a proxy for how much the state is visited
-    /reviewed). Each result: {name, total_ratings, place_count}."""
+    """Return the most popular states ranked by total review count."""
     conn = new_connection()
     cursor = conn.cursor()
     try:
@@ -155,69 +353,35 @@ def query_popular_states(limit=10):
         conn.close()
 
 
-def query_trending():
+def query_by_keyword(keyword, limit=10):
+    """Return city, state and place names containing `keyword` (case-insensitive).
+    Exact matches sort first; ties broken by source priority then alphabetically."""
+    term = keyword.strip().lower()
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = "%" + escaped + "%"
+
+    sources = [("cities", "city", 0), ("states", "state", 1), ("places", "place", 2)]
+
     conn = new_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            "SELECT TOP (10) p.*, c.name AS city, s.name AS state "
-            "FROM places p "
-            "LEFT JOIN cities c ON p.city_id = c.id "
-            "LEFT JOIN states s ON c.state_id = s.id "
-            "WHERE p.num_ratings IS NOT NULL ORDER BY p.num_ratings DESC"
-        )
-        return [_row_to_dict(r) for r in _cursor_to_dicts(cursor)]
+        results = []
+        for table, type_label, rank in sources:
+            cursor.execute(
+                f"SELECT name FROM {table} WHERE name LIKE ?",
+                (like,),
+            )
+            for row in cursor.fetchall():
+                name = row[0]
+                results.append({
+                    "name": name,
+                    "type": type_label,
+                    "_exact": str(name).strip().lower() == term,
+                    "_rank": rank,
+                })
+
+        results.sort(key=lambda r: (not r["_exact"], r["_rank"], str(r["name"]).lower()))
+        return [{"name": r["name"], "type": r["type"]} for r in results[:limit]]
     finally:
         cursor.close()
         conn.close()
-
-
-def query_nearby(lat, lon):
-    conn = new_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "SELECT p.*, c.name AS city, s.name AS state, c.lat AS city_lat, c.lon AS city_lon "
-            "FROM places p "
-            "JOIN cities c ON p.city_id = c.id "
-            "LEFT JOIN states s ON c.state_id = s.id"
-        )
-        rows = _cursor_to_dicts(cursor)
-    finally:
-        cursor.close()
-        conn.close()
-
-    with_dist = []
-    for row in rows:
-        if row["city_lat"] is not None:
-            dist = haversine(lat, lon, float(row["city_lat"]), float(row["city_lon"]))
-            with_dist.append((dist, row))
-
-    with_dist.sort(key=lambda x: x[0])
-    return [_row_to_dict(r) for _, r in with_dist[:10]]
-
-
-def query_weekend(lat, lon):
-    conn = new_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "SELECT p.*, c.name AS city, s.name AS state, c.lat AS city_lat, c.lon AS city_lon "
-            "FROM places p "
-            "JOIN cities c ON p.city_id = c.id "
-            "LEFT JOIN states s ON c.state_id = s.id"
-        )
-        rows = _cursor_to_dicts(cursor)
-    finally:
-        cursor.close()
-        conn.close()
-
-    candidates = []
-    for row in rows:
-        if row["city_lat"] is not None:
-            dist = haversine(lat, lon, float(row["city_lat"]), float(row["city_lon"]))
-            if dist <= 300:
-                candidates.append((dist, row))
-
-    candidates.sort(key=lambda x: float(x[1].get("rating") or 0), reverse=True)
-    return [_row_to_dict(r) for _, r in candidates[:10]]

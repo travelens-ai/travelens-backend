@@ -125,14 +125,13 @@ class ItenaryRecommendationSystem:
             print(f"Error generating popular destinations: {str(e)}")
         
     def get_popular_destination(self):
-        """Load the most popular top 10 destinations"""
+        """Return city-level popular destination cards from the DB."""
         try:
-            with open(os.path.join(_PROJECT_ROOT, 'popular_destination.pkl'), 'rb') as f:
-                popular_destination = pickle.load(f)
-            return popular_destination.to_dict(orient='records')
-        except FileNotFoundError:
-            print("No popular destination found. Please run set_popular_destination() first.")
-            return None
+            from features.places.service import query_popular
+            return query_popular()
+        except Exception as e:
+            print(f"Error fetching popular destinations: {e}")
+            return []
     
     def get_similar_places(self):
         try:
