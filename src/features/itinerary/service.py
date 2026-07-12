@@ -37,9 +37,13 @@ def initialize_recommender():
     def _do_init():
         global _initialized, _init_error
         try:
-            recommender.initialize()
-            _initialized = True
-            print("Background initialization complete.")
+            success = recommender.initialize()
+            if success:
+                _initialized = True
+                print("Background initialization complete.")
+            else:
+                _init_error = _init_error or "Recommender initialization failed (check server logs for details)"
+                print("Background initialization returned False.")
         except Exception as e:
             _init_error = str(e)
             print(f"Background initialization failed: {e}")

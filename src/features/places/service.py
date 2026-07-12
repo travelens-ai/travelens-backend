@@ -1,5 +1,6 @@
 import math
 import random
+import re
 import threading
 import collections
 
@@ -186,9 +187,96 @@ def _city_aggregate_query(city_filter=None, limit=50):
     ]
 
 
+# Scenic types get priority for the city card image — these are the places
+# a traveller actually wants to see on the card (not temples/malls/hotels).
+_SCENIC_TYPES = {
+    'Beach', 'Nature', 'Waterfall', 'National Park', 'Hill', 'Viewpoint',
+    'Wildlife Sanctuary', 'Historical Fort', 'Historical Palace', 'Lake',
+    'Valley', 'Hill Station', 'Island', 'Cave', 'Hot Spring', 'Glacier',
+    'Scenic Area', 'Activity Center', 'Garden', 'Dam', 'Historical Monument',
+    # Rajasthan / heritage cities — forts and palaces often typed as Historical Site
+    'Historical Site', 'Desert',
+    # Other useful types found in CSV
+    'Mountain Pass', 'Natural Wonder', 'Plateau', 'Backwaters',
+    # Iconic religious sites ARE the draw for Varanasi, Amritsar, Haridwar, Madurai etc.
+    'Religious Site', 'Religious',
+}
+
+
+_VIBE_TYPES = {
+    'Beach':      {'Beach', 'Coastal', 'Island'},
+    'Heritage':   {'Historical Fort', 'Historical Palace', 'Historical Site',
+                   'Historical Monument', 'Historical Observatory',
+                   'Astronomical Observatory', 'Archaeological Site', 'Fort'},
+    'Nature':     {'Nature', 'National Park', 'Waterfall', 'Lake', 'Valley', 'Hill',
+                   'Hill Station', 'Mountain Pass', 'Glacier', 'Cave', 'Hot Spring',
+                   'Natural Wonder', 'Plateau', 'Backwaters', 'Scenic Area', 'Dam',
+                   'Viewpoint', 'Desert', 'River', 'Garden', 'Botanical Garden'},
+    'Adventure':  {'Adventure', 'Adventure Spot', 'Adventure Sports', 'Trekking',
+                   'Ski Resort', 'Activity Center', 'Racing Track'},
+    'Wildlife':   {'Wildlife Sanctuary', 'Wildlife', 'Nature Reserve',
+                   'Bird Sanctuary', 'Zoological Park'},
+    'Pilgrimage': {'Religious Site', 'Religious', 'Temple', 'Church', 'Mosque',
+                   'Shrine', 'Buddhist Monastery', 'Gurudwara'},
+    'Culture':    {'Museum', 'Art Museum', 'Cultural Center', 'Market', 'Theatre', 'Fair'},
+}
+_VIBE_LABEL = {
+    'Beach':      'Beach Getaway',
+    'Heritage':   'Heritage City',
+    'Nature':     'Nature Escape',
+    'Adventure':  'Adventure Hub',
+    'Wildlife':   'Wildlife Retreat',
+    'Pilgrimage': 'Pilgrimage Town',
+    'Culture':    'Cultural Hub',
+}
+_SKIP_VIBE = {'Parking', 'Restaurant', 'Hotel', 'Shop', 'Mall',
+              'Petrol Pump', 'Hospital', 'Bank', 'ATM', 'University'}
+_type_to_vibe = {t: v for v, types in _VIBE_TYPES.items() for t in types}
+
+# Hand-curated overrides: algorithm picks wrong image for these cities
+# (iconic image loses on rating to a less visually representative place).
+_CITY_IMAGE_OVERRIDE = {
+    'puducherry':         'Paradise_Beach_Puducherry_Puducherry.webp',
+    'shimla':             'Mall_Road_Shimla_Himachal_Pradesh.webp',
+    'chopta':             'Chandrashila_Peak_Chopta_Uttarakhand1744839886130.webp',
+    'ziro':               'Ziro_Valley_Ziro_Arunachal_Pradesh1744814868045.webp',
+    'mawlynnong':         'Living_Root_Bridge_Mawlynnong_Meghalaya1744829095683.webp',
+    'manali':             'Solang_Valley_Manali_Himachal_Pradesh.webp',
+    'rishikesh':          'Laxman_Jhula_Rishikesh_Uttarakhand1744839587223.webp',
+    'hampi':              'Stone_Chariot_Hampi_Karnataka.webp',
+    'panaji':             'Baga_Beach_Panaji_Goa.webp',
+    'tawang':             'Tawang_Monastery_Tawang_Arunachal_Pradesh.webp',
+    'darjeeling':         'Toy_Train_Ride_Darjeeling_West_Bengal.webp',
+    # major city fixes
+    'chennai':            'Marina_Beach_Chennai_Tamil_Nadu.webp',
+    'kolkata':            'Victoria_Memorial_Kolkata_West_Bengal.webp',
+    'srinagar':           'Dal_Lake_Srinagar_Jammu_and_Kashmir.webp',
+    'varanasi':           'Ghats_of_Varanasi_Varanasi_Uttar_Pradesh.webp',
+    'jodhpur':            'Mehrangarh_Fort_Jodhpur_Rajasthan.webp',
+    # regional city fixes
+    'thrissur':           'Athirappilly_Falls_Thrissur_Kerala.webp',
+    'thiruvananthapuram': 'Kovalam_Beach_Thiruvananthapuram_Kerala.webp',
+    'imphal':             'Kangla_Fort_Imphal_Manipur.webp',
+    'diu':                'Diu_Fort_Diu_Dadra_and_Nagar_Haveli_and_Daman_and_Diu.webp',
+    'daman':              'Moti_Daman_Fort_Daman_Dadra_and_Nagar_Haveli_and_Daman_and_Diu.webp',
+    'nagpur':             'Futala_Lake_Nagpur_Maharashtra.webp',
+    'nashik':             'Pandavleni_Caves_Nashik_Maharashtra.webp',
+    'mandi':              'Prashar_Lake_Mandi_Himachal_Pradesh.webp',
+    'silvassa':           'Khanvel_Silvassa_Dadra_and_Nagar_Haveli_and_Daman_and_Diu.webp',
+    'sirmaur':            'Renuka_Lake_Sirmaur_Himachal_Pradesh.webp',
+    'ponda':              'Spice_Plantations_Ponda_Goa.webp',
+    'kodagu':             'Nagarhole_National_Park_Kodagu_Karnataka.webp',
+    'ernakulam':          'Fort_Kochi_Ernakulam_Kerala1744825586688.webp',
+    'guwahati':           'Dipor_Bil_Guwahati_Assam.webp',
+    'bangalore':          'Vidhana_Soudha_Bangalore_Karnataka1744824261443.webp',
+    'dehradun':           'Forest_Research_Institute_Dehradun_Uttarakhand1744839332689.webp',
+    'alleppey':           'Alleppey_Backwaters_Alappuzha_Kerala.webp',
+}
+
+
 def _attach_images_and_activities(city_rows):
-    """Enrich city rows with image and best_activities from the in-memory
-    places DataFrame (CSV-sourced, loaded by the recommender at startup)."""
+    """Enrich city rows with CSV-sourced image, rating, review_count,
+    famous_places list, and best_activities."""
     try:
         from features.itinerary.service import recommender
         if recommender is None:
@@ -197,36 +285,135 @@ def _attach_images_and_activities(city_rows):
     except Exception:
         return city_rows
 
-    # Best image per city — top-rated place that has a non-empty image.
-    has_img = df[
-        df['image'].notna() & (df['image'].astype(str).str.strip() != '') &
-        df['city'].notna()
+    df_valid = df[df['city'].notna()].copy()
+    has_img = df_valid[
+        df_valid['image'].notna() & (df_valid['image'].astype(str).str.strip() != '')
     ]
-    img_map = (
-        has_img.sort_values('rating', ascending=False)
-               .drop_duplicates('city')
-               .set_index('city')['image']
-               .to_dict()
-    )
-    img_map_lower = {str(k).lower(): v for k, v in img_map.items()}
 
-    # Top 3 activity tags per city (most frequent across all its places).
+    name_col = 'name' if 'name' in df.columns else ('placename' if 'placename' in df.columns else None)
+    has_type = 'type' in df.columns
+    has_rating = 'rating' in df.columns
+    has_reviews = 'no of rating' in df.columns
+
+    # --- avg_rating: mean of top-5 rated places per city (CSV, curated data) ---
+    rating_map = {}
+    review_map = {}
+    if has_rating:
+        for city_name, grp in df_valid.groupby('city'):
+            top5 = grp.nlargest(5, 'rating')
+            rating_map[city_name.lower()] = round(float(top5['rating'].mean()), 2)
+            if has_reviews:
+                review_map[city_name.lower()] = int(grp['no of rating'].sum())
+
+    # --- Vibe: dominant place-type bucket per city ---
+    vibe_map = {}
+    vibe_bucket_types = {}  # city (original case) -> set of raw types in dominant vibe
+    if has_type:
+        for city_name, grp in df_valid[~df_valid['type'].isin(_SKIP_VIBE)].groupby('city'):
+            counts = grp['type'].map(_type_to_vibe).dropna().value_counts()
+            if not counts.empty:
+                dominant_vibe = counts.index[0]
+                vibe_map[city_name.lower()] = _VIBE_LABEL[dominant_vibe]
+                vibe_bucket_types[city_name] = _VIBE_TYPES[dominant_vibe]
+
+    # --- Image: 6-tier priority ---
+    # Tier 1: _0 + scenic type  (curated landmark)
+    # Tier 2: ts + scenic type  (auto-generated landmark)
+    # Tier 3: _0 + city vibe bucket  (best image across all types in dominant vibe)
+    # Tier 4: ts + city vibe bucket
+    # Tier 5: _0 + any
+    # Tier 6: ts + any
+    _is_orig = lambda img: not bool(re.search(r'\d{10,}', str(img)))
+
+    def _best_img_map(df_subset):
+        if df_subset.empty:
+            return {}
+        return (df_subset.sort_values('rating', ascending=False)
+                         .drop_duplicates('city')
+                         .set_index('city')['image']
+                         .to_dict())
+
+    img_map_lower = {}
+    if has_type:
+        orig    = has_img[has_img['image'].apply(_is_orig)]
+        ts      = has_img[~has_img['image'].apply(_is_orig)]
+        orig_sc = orig[orig['type'].isin(_SCENIC_TYPES)]
+        ts_sc   = ts[ts['type'].isin(_SCENIC_TYPES)]
+        orig_vib = orig[orig.apply(
+            lambda r: r['type'] in vibe_bucket_types.get(r['city'], set()), axis=1
+        )]
+        ts_vib = ts[ts.apply(
+            lambda r: r['type'] in vibe_bucket_types.get(r['city'], set()), axis=1
+        )]
+        for tier in (_best_img_map(orig_sc), _best_img_map(ts_sc),
+                     _best_img_map(orig_vib), _best_img_map(ts_vib),
+                     _best_img_map(orig), _best_img_map(ts)):
+            for k, v in tier.items():
+                img_map_lower.setdefault(str(k).lower(), v)
+    else:
+        orig = has_img[has_img['image'].apply(_is_orig)]
+        for k, v in _best_img_map(orig).items():
+            img_map_lower[str(k).lower()] = v
+        for k, v in _best_img_map(has_img).items():
+            img_map_lower.setdefault(str(k).lower(), v)
+
+    # --- famous_places: top 3 scenic-typed places per city by rating ---
+    def _top3_unique(grp, col):
+        seen, result = set(), []
+        for name in grp.sort_values('rating', ascending=False)[col]:
+            n = str(name).strip()
+            if n and n not in seen:
+                seen.add(n)
+                result.append(n)
+            if len(result) == 3:
+                break
+        return result
+
+    famous_map = {}
+    if name_col and has_type:
+        scenic_named = df_valid[
+            df_valid['type'].isin(_SCENIC_TYPES) & df_valid[name_col].notna()
+        ]
+        for city_name, grp in scenic_named.groupby('city'):
+            famous_map[city_name.lower()] = _top3_unique(grp, name_col)
+    # Fallback for cities with no scenic-typed places
+    if name_col:
+        for city_name, grp in df_valid[df_valid[name_col].notna()].groupby('city'):
+            key = city_name.lower()
+            if key not in famous_map:
+                famous_map[key] = _top3_unique(grp, name_col)
+
+    # --- best_activities: top 3 most-frequent activity tags per city ---
     act_col = 'famous activities'
     act_map = {}
     if act_col in df.columns:
-        for city_name, group in df[df['city'].notna()].groupby('city'):
+        for city_name, grp in df_valid.groupby('city'):
             counter = collections.Counter()
-            for val in group[act_col].dropna():
+            for val in grp[act_col].dropna():
                 for act in str(val).split(','):
                     act = act.strip()
                     if act:
                         counter[act] += 1
             act_map[city_name.lower()] = ', '.join(a for a, _ in counter.most_common(3))
 
+    img_map_lower.update(_CITY_IMAGE_OVERRIDE)
+
     for row in city_rows:
         key = str(row['city']).lower()
         row['image'] = img_map_lower.get(key, '')
+        row['vibe'] = vibe_map.get(key, '')
         row['best_activities'] = act_map.get(key, '')
+        row['famous_places'] = famous_map.get(key, [])
+        # Overwrite DB-aggregated rating/reviews with cleaner CSV values
+        if key in rating_map:
+            row['avg_rating'] = rating_map[key]
+        if key in review_map:
+            row['review_count'] = review_map[key]
+        # Remove internal/redundant fields
+        row.pop('lat', None)
+        row.pop('lon', None)
+        row.pop('total_reviews', None)
+        row.pop('place_count', None)
 
     return city_rows
 

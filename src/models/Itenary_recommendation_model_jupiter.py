@@ -46,19 +46,12 @@ class ItenaryRecommendationSystem:
 
     def initialize(self):
         """Initialize models and load data"""
-        try:
-            # Add the appropriate code here or remove the try block if           
-            self._setup_models()
-            print("Models initialized successfully.")
-            self._load_data()
-            self.schedule_popular_destination()
-            self.schedule_similar_places()
-            # threading.Thread(target=self.schedule_popular_destination, daemon=True).start()
-            # threading.Thread(target=self.schedule_similar_places, daemon=True).start()
-            return True
-        except Exception as e:
-            print(f"Initialization failed: {str(e)}")
-            return False
+        self._setup_models()
+        print("Models initialized successfully.")
+        self._load_data()
+        self.schedule_popular_destination()
+        self.schedule_similar_places()
+        return True
     
     def schedule_similar_places(self):
         self.update_similar_places()  # Trigger immediately for the first time
@@ -765,10 +758,11 @@ class ItenaryRecommendationSystem:
             place_image_map = {}
 
             for place in merged_places:
-                if(pd.notna(place['image'])):
-                    placename = place['placename']
-                    image = place['image']
-                    place_image_map[placename] = image
+                image = place.get('image')
+                if image and pd.notna(image):
+                    placename = place.get('placename') or place.get('city') or place.get('name', '')
+                    if placename:
+                        place_image_map[placename] = image
             
             placename = itinerary['name']
 
@@ -906,8 +900,10 @@ class ItenaryRecommendationSystem:
                 }
             }
 
-        except (KeyError, IndexError, TypeError) as e:
+        except Exception as e:
+            import traceback
             print("Error while processing:", e)
+            traceback.print_exc()
             return {
                 'status': 'error',
                 'message': str(e)
