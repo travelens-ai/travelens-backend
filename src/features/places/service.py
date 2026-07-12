@@ -233,15 +233,29 @@ def _attach_images_and_activities(city_rows):
 
 _CITY_PREFIXES = ('new ', 'old ', 'north ', 'south ', 'east ', 'west ', 'greater ')
 
+# Known alternate spellings that should resolve to the same city.
+_CITY_ALIASES = {
+    'bengaluru': 'bangalore',
+    'bombay':    'mumbai',
+    'calcutta':  'kolkata',
+    'madras':    'chennai',
+    'mysuru':    'mysore',
+    'thiruvananthapuram': 'trivandrum',
+    'kozhikode': 'calicut',
+    'thrissur':  'trichur',
+    'ernakulam': 'kochi',
+}
+
 def _city_dedup_key(name):
-    """Normalise city name for dedup — strip direction/qualifier prefixes so
-    'new delhi' and 'delhi' collapse to the same key."""
+    """Normalise city name for dedup — strip direction/qualifier prefixes and
+    resolve known alternate spellings so duplicates collapse to one key."""
     key = str(name).lower().strip()
     for prefix in _CITY_PREFIXES:
         if key.startswith(prefix):
             key = key[len(prefix):]
             break
-    return key.replace(' ', '')
+    key = key.replace(' ', '')
+    return _CITY_ALIASES.get(key, key)
 
 
 def _dedup_cities(rows):
