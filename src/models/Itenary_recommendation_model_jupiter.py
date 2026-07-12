@@ -231,13 +231,14 @@ class ItenaryRecommendationSystem:
         try:
             placeholders = ",".join(["?"] * len(names))
             rows = fetch_dicts(
-                f"""SELECT LOWER(p.name) AS name, i.image_name AS image
+                f"""SELECT LOWER(COALESCE(p.display_name, p.name)) AS display, LOWER(p.name) AS canonical, i.image_name AS image
                     FROM places p
                     JOIN place_image_map pim ON pim.place_id = p.id
                     JOIN images i ON pim.image_id = i.id
-                    WHERE LOWER(p.name) IN ({placeholders})
+                    WHERE LOWER(p.display_name) IN ({placeholders})
+                       OR (p.display_name IS NULL AND LOWER(p.name) IN ({placeholders}))
                     ORDER BY CASE WHEN i.image_name LIKE '%\\_0.webp' ESCAPE '\\' THEN 0 ELSE 1 END""",
-                tuple(names),
+                tuple(names) + tuple(names),
             )
         except Exception as e:
             print(f"  _get_images_for_places failed ({e})")
@@ -245,9 +246,11 @@ class ItenaryRecommendationSystem:
 
         result = {}
         for row in rows:
-            result.setdefault(row["name"], [])
-            if row["image"] and row["image"] not in result[row["name"]]:
-                result[row["name"]].append(row["image"])
+            # Index by both display_name and canonical name so either lookup hits
+            for key in {row["display"], row["canonical"]}:
+                result.setdefault(key, [])
+                if row["image"] and row["image"] not in result[key]:
+                    result[key].append(row["image"])
         return result
 
     def _search_images_by_keywords(self, keywords, limit=5):
@@ -603,7 +606,7 @@ class ItenaryRecommendationSystem:
                 restaurants,
             )
 
-            return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
+            return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'), user_preferences=user_preferences)
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing:", e)
@@ -668,7 +671,7 @@ class ItenaryRecommendationSystem:
                 user_preferences, places, hotels, restaurants,
             )
 
-            result = self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
+            result = self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'), user_preferences=user_preferences)
 
             yield {'event': 'complete', 'data': result}
 
@@ -733,7 +736,7 @@ class ItenaryRecommendationSystem:
 
             self._accumulate_usage(itinerary, response)
 
-            return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'))
+            return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'), user_preferences=user_preferences)
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing edit:", e)
@@ -742,7 +745,59 @@ class ItenaryRecommendationSystem:
                 'message': str(e)
             }
 
-    def _finalize_itinerary(self, itinerary, places, start_date=None):
+    def _get_available_places(self, itinerary, user_preferences, count):
+        """Return up to `count` scored places not already in the itinerary,
+        enriched to the same shape as places_to_visit entries."""
+        used_names = set()
+        for day in itinerary.get('itinerary', []):
+            for p in day.get('places_to_visit', []):
+                n = p.get('name', '').strip()
+                if n:
+                    used_names.add(n.lower())
+
+        scored_df = self._get_place_recommendations(user_preferences)
+        remaining_df = scored_df[
+            ~scored_df['effective_name'].str.strip().str.lower().isin(used_names)
+        ].head(count)
+
+        if remaining_df.empty:
+            return []
+
+        COLS = [
+            'effective_name', 'placename', 'city', 'state',
+            'primary_type_name', 'place_types', 'famous activities',
+            'best month to visit', 'rating', 'google_rating', 'google_rating_count',
+            'lat', 'lon', 'short_formatted_address', 'editorial_summary',
+            'review_summary', 'opening_hours', 'website_uri', 'google_maps_uri',
+        ]
+        avail_cols = [c for c in COLS if c in remaining_df.columns]
+        places_list = remaining_df[avail_cols].fillna('').to_dict(orient='records')
+
+        for ap in places_list:
+            ap['name'] = ap.pop('effective_name', ap.get('placename', ''))
+            ap.setdefault('reason', '')
+            ap.setdefault('activities', [])
+            ap.setdefault('duration', '')
+            ap.setdefault('suggested_start_time', '')
+            ap.setdefault('travel_from_prev', None)
+            ap.setdefault('images', [])
+
+        image_map = self._get_images_for_places([ap['name'] for ap in places_list])
+        for ap in places_list:
+            ap['images'] = image_map.get(ap['name'].strip().lower(), [])
+
+        _wrapper = {
+            'city': itinerary.get('city', ''),
+            'state': itinerary.get('state', ''),
+            'itinerary': [{'places_to_visit': places_list}],
+            'hotels': [],
+        }
+        self._attach_lat_long(_wrapper)
+        self._attach_db_fields(_wrapper)
+
+        return places_list
+
+    def _finalize_itinerary(self, itinerary, places, start_date=None, user_preferences=None):
         """Shared post-processing for generated/edited itineraries: resolves
         images for each place and the destination gallery, persists new places,
         attaches similar-place images, cleans NaNs, and builds the response."""
@@ -810,10 +865,7 @@ class ItenaryRecommendationSystem:
                     images = place_images_db.get(key, [])[:5]
 
                     if not images:
-                        location = place.get('location', '') or ''
-                        loc_parts = [p.strip() for p in str(location).split(',') if p.strip()]
-                        keywords = [place_name] + loc_parts + [itin_city, itin_state]
-                        images = self._search_images_by_keywords(keywords, limit=5)
+                        images = self._search_images_by_keywords([place_name], limit=5)
 
                     if not images:
                         # Fallback to the single image already in memory from places_df
@@ -891,6 +943,15 @@ class ItenaryRecommendationSystem:
             # internal key from the itinerary so it doesn't leak into the
             # client response / stored response_json.
             token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
+
+            if user_preferences:
+                try:
+                    itinerary['available_places'] = self._get_available_places(
+                        itinerary, user_preferences, 30
+                    )
+                except Exception as e:
+                    print(f"Warning: _get_available_places failed: {e}")
+                    itinerary['available_places'] = []
 
             return {
                 'status': 'success',
@@ -2345,8 +2406,10 @@ Return only this JSON. No text before or after.
             self._save_new_places_to_db(cursor, itinerary)
             self._save_new_hotels_to_db(cursor, itinerary)
             self._save_new_restaurants_to_db(cursor, itinerary)
+            conn.commit()
         except Exception as e:
             print(f"[save_new_places] error: {e}")
+            conn.rollback()
         finally:
             cursor.close()
             conn.close()
@@ -2396,9 +2459,9 @@ Return only this JSON. No text before or after.
                 city_id = self._resolve_city_id(cursor, city, state)
                 famous = ", ".join(activities) if isinstance(activities, list) and activities else None
                 cursor.execute(
-                    "INSERT INTO places (name, city_id, famous_activities, lat, lon, full_address) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (key, city_id, famous, lat, lon, full_address or None),
+                    "INSERT INTO places (name, display_name, city_id, famous_activities, lat, lon, full_address) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (key, name, city_id, famous, lat, lon, full_address or None),
                 )
                 inserted += 1
             except Exception as e:

@@ -99,6 +99,7 @@ def _prune_result_for_storage(result):
         detailed = data.get("detailed_itinerary")
         if isinstance(detailed, dict):
             detailed.pop("similar_places", None)
+            detailed.pop("available_places", None)
     return pruned
 
 
