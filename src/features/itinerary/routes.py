@@ -357,7 +357,7 @@ def get_popular_destination():
         return itinerary_service.loading_response()
     try:
         result = itinerary_service.recommender.get_popular_destination()
-        return jsonify(result), 200
+        return jsonify(with_image_urls(result)), 200
     except Exception as e:
         print(f"Error fetching popular destinations: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
