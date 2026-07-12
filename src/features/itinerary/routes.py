@@ -35,6 +35,7 @@ def generate_itinerary():
             start_date: "2026-07-15"
             budget: "25000"
             suggested_places: []
+            hotel_preference: "mid"
     responses:
       200:
         description: Itinerary generated
@@ -204,6 +205,7 @@ def generate_itinerary_stream():
             start_date: "2026-07-20"
             budget: "30000"
             suggested_places: []
+            hotel_preference: "mid"
     responses:
       200:
         description: text/event-stream of progress events then the itinerary, streamed in pieces
@@ -301,6 +303,7 @@ def edit_itinerary():
             suggested_places: ["Baga Beach", "Dudhsagar Falls"]
             budget: "25000"
             start_date: "2026-07-15"
+            hotel_preference: "luxury"
     responses:
       200:
         description: Itinerary regenerated with the required places
