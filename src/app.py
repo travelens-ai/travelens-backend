@@ -85,10 +85,12 @@ def _run(script, args=[]):
                    cwd=os.path.dirname(_SCRIPTS_DIR))
 
 _scheduler = BackgroundScheduler(daemon=True)
-_TEST_MODE = os.getenv("CRON_TEST_MODE", "0") == "1"
+_CRON_MODE = os.getenv("CRON_MODE", "off")  # "prod" | "test" | "off"
 
-if _TEST_MODE:
-    # Test mode: both jobs fire every 5 minutes with 10 items each
+if _CRON_MODE == "off":
+    print("[cron] DISABLED — set CRON_MODE=prod or CRON_MODE=test to enable")
+elif _CRON_MODE == "test":
+    # Test mode: all jobs fire every 5 minutes with small batches
     print("[cron] TEST MODE — running every 5 minutes with batch=10")
     _scheduler.add_job(lambda: _run("update_google_ratings.py", ["--batch", "10"]),
                        "interval", minutes=5, id="google_ratings")
