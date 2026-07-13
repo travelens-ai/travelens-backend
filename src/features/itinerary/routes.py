@@ -241,36 +241,83 @@ def generate_itinerary_stream():
         event_name = payload.get("event", "message") if isinstance(payload, dict) else "message"
         return f"event: {event_name}\ndata: {json.dumps(payload, default=_json_default)}\n\n"
 
-    def event_stream():
-        try:
-            # Serve a cached itinerary instantly when we have one.
-            cached_result, cached_id = itinerary_service.get_cached_itinerary(cache_key)
-            if cached_result is not None:
-                response = with_image_urls(cached_result) if isinstance(cached_result, dict) else cached_result
-                for ev in _decompose_response_events(response, cached_id):
-                    yield _sse(ev)
-                return
+    def _map_event(ev):
+        """Turn a raw model event into the wire string, or None to drop it."""
+        event = ev.get("event")
+        if event == "complete":
+            # Days were already streamed incrementally. Persist the full
+            # result and emit the terminal `done` marker with the id.
+            result = ev.get("data")
+            itinerary_id = itinerary_service.store_itinerary(cache_key, user_preferences, result)
+            return _sse({"event": "done", "itinerary_id": itinerary_id})
+        if event == "ad_slot":
+            # Model signals an ad slot; the route owns ad config.
+            return _sse({"event": "ad", "day": ev.get("day"), "item": section_ad()})
+        if event in ("progress", "error"):
+            return _sse(ev)
+        # info / images / hotels / similar_place / day_info / place / meal /
+        # available_places — URL-prefix any bare image names.
+        return _sse(with_image_urls(ev))
 
-            for ev in itinerary_service.recommender.generate_itinerary_stream(user_preferences):
-                event = ev.get("event")
-                if event == "complete":
-                    # Days were already streamed incrementally. Persist the full
-                    # result and emit the terminal `done` marker with the id.
-                    result = ev.get("data")
-                    itinerary_id = itinerary_service.store_itinerary(cache_key, user_preferences, result)
-                    yield _sse({"event": "done", "itinerary_id": itinerary_id})
-                elif event == "ad_slot":
-                    # Model signals an ad slot; the route owns ad config.
-                    yield _sse({"event": "ad", "day": ev.get("day"), "item": section_ad()})
-                elif event in ("progress", "error"):
-                    yield _sse(ev)
-                else:
-                    # info / images / hotels / similar_place / day_info / place /
-                    # meal / available_places — URL-prefix any bare image names.
-                    yield _sse(with_image_urls(ev))
-        except Exception as e:
-            print(f"Error streaming itinerary: {e}")
-            yield _sse({"event": "error", "message": str(e)})
+    # Heartbeat interval (seconds). Azure App Service's front-end load balancer
+    # (ARR) drops any connection idle for ~230s — a limit that CANNOT be raised.
+    # Each per-day LLM call runs silently for many seconds, so without traffic
+    # in between the stream is killed mid-way (client sees only info/hotels +
+    # 1-2 days). We run the generator in a worker thread and emit an SSE comment
+    # (": keepalive") whenever no real event has arrived within this window, so
+    # bytes keep flowing and the idle timer never trips.
+    HEARTBEAT_SECS = 15
+
+    def event_stream():
+        import queue as _queue
+        import threading as _threading
+
+        # Cached itinerary: replay instantly, no long LLM calls, no heartbeat.
+        cached_result, cached_id = itinerary_service.get_cached_itinerary(cache_key)
+        if cached_result is not None:
+            response = with_image_urls(cached_result) if isinstance(cached_result, dict) else cached_result
+            for ev in _decompose_response_events(response, cached_id):
+                yield _sse(ev)
+            return
+
+        q = _queue.Queue()
+        _DONE = object()
+
+        def _produce():
+            try:
+                for ev in itinerary_service.recommender.generate_itinerary_stream(user_preferences):
+                    q.put(("event", ev))
+            except Exception as e:
+                print(f"Error streaming itinerary: {e}")
+                q.put(("error", str(e)))
+            finally:
+                q.put(("done", _DONE))
+
+        worker = _threading.Thread(target=_produce, daemon=True)
+        worker.start()
+
+        while True:
+            try:
+                kind, payload = q.get(timeout=HEARTBEAT_SECS)
+            except _queue.Empty:
+                # No event within the window — send a heartbeat comment. SSE
+                # comment lines (starting with ':') are ignored by clients.
+                yield ": keepalive\n\n"
+                continue
+            if kind == "done":
+                break
+            if kind == "error":
+                yield _sse({"event": "error", "message": payload})
+                continue
+            # kind == "event"
+            try:
+                line = _map_event(payload)
+            except Exception as e:
+                print(f"Error mapping itinerary event: {e}")
+                yield _sse({"event": "error", "message": str(e)})
+                continue
+            if line:
+                yield line
 
     return Response(
         stream_with_context(event_stream()),
