@@ -114,11 +114,13 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
       3. images       — the main destination image gallery
       4. hotels       — trip-level hotels (one event, all 3 options)
       5. per day:
+           day_info   — the day's theme + day_summary (emitted first)
            place      — each place_to_visit, one per event
            ad         — ad slot between places and meals
            meal       — breakfast/lunch/dinner, one per event (with slot field)
       6. similar_place— each similar place, one per event
-      7. done         — terminal marker carrying itinerary_id
+      7. available_places — not-yet-used places the client can add (one event)
+      8. done         — terminal marker carrying itinerary_id
     `skip_events` is a set of event names to omit. Images are already
     URL-prefixed by the caller (with_image_urls)."""
     skip_events = skip_events or set()
@@ -151,11 +153,20 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     if trip_hotels:
         yield {"event": "hotels", "hotels": trip_hotels}
 
-    # 4. Day by day: places → ad → meals (breakfast/lunch/dinner).
+    # 4. Day by day: day_info (theme/summary) → places → ad → meals.
     for day in itinerary.get("itinerary", []):
         day_no = day.get("day")
         places = day.get("places_to_visit", [])
         meals = day.get("meals", {})
+
+        # Per-day header carrying the day's theme and one-line summary, emitted
+        # before the day's places so the client can render the day heading.
+        yield {
+            "event": "day_info",
+            "day": day_no,
+            "theme": day.get("theme", ""),
+            "day_summary": day.get("day_summary", ""),
+        }
 
         for place in places:
             yield {"event": "place", "day": day_no, "item": place}
@@ -171,7 +182,11 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     for similar in itinerary.get("similar_places", []):
         yield {"event": "similar_place", "item": similar}
 
-    # 6. Terminal marker.
+    # 6. Available (not-yet-used) places the client can add to the trip.
+    if "available_places" not in skip_events:
+        yield {"event": "available_places", "available_places": itinerary.get("available_places", [])}
+
+    # 7. Terminal marker.
     yield {"event": "done", "itinerary_id": itinerary_id}
 
 
