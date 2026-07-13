@@ -708,14 +708,27 @@ class ItenaryRecommendationSystem:
             for day_no in range(1, total_days + 1):
                 yield {'event': 'progress', 'step': f'day_{day_no}',
                        'message': f'Planning day {day_no} of {total_days}...'}
-                extra = self._generate_extra_days(
-                    user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-                    start_day=day_no, num_days=1, used_places=used_places,
-                    itinerary=itinerary,
-                )
+                # Generate this day, retrying once on an empty/failed result. A
+                # single day's failure must NOT abort the whole trip — otherwise
+                # a transient LLM hiccup on day 1 leaves the client with only
+                # info/hotels/images. Retry, then skip the day if still empty.
+                extra = None
+                for attempt in range(2):
+                    try:
+                        extra = self._generate_extra_days(
+                            user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+                            start_day=day_no, num_days=1, used_places=used_places,
+                            itinerary=itinerary,
+                        )
+                    except Exception as day_err:
+                        print(f"[stream] day {day_no} attempt {attempt + 1} raised: {day_err}")
+                        extra = None
+                    if extra:
+                        break
+                    print(f"[stream] day {day_no} attempt {attempt + 1} returned nothing; retrying...")
                 if not extra:
-                    print(f"[stream] day {day_no} generation returned nothing; stopping.")
-                    break
+                    print(f"[stream] day {day_no} failed after retries; skipping this day.")
+                    continue
                 day = extra[0]
                 day['day'] = day_no
                 # Finalize just this day (images, lat/lon, travel times, weather).
