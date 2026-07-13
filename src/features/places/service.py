@@ -572,14 +572,39 @@ def query_popular_states(limit=10):
             "OFFSET 0 ROWS FETCH NEXT (?) ROWS ONLY",
             (limit,),
         )
-        return [
+        states = [
             {
+                "id": r[0],
                 "name": r[1],
                 "total_ratings": int(r[2]) if r[2] is not None else 0,
                 "place_count": int(r[3]),
             }
             for r in cursor.fetchall()
         ]
+        # Attach a representative image per state via the real relationship
+        # (images -> place_image_map -> places -> cities -> states), picking the
+        # image of the highest-rated place in that state. This avoids the
+        # false positives of substring-matching image_name (e.g. "Manipur"
+        # matching "Mukutmanipur").
+        for state in states:
+            try:
+                cursor.execute(
+                    "SELECT TOP 1 i.image_name "
+                    "FROM images i "
+                    "JOIN place_image_map pim ON pim.image_id = i.id "
+                    "JOIN places p ON pim.place_id = p.id "
+                    "JOIN cities c ON p.city_id = c.id "
+                    "WHERE c.state_id = ? "
+                    "ORDER BY p.num_ratings DESC, i.id",
+                    (state["id"],),
+                )
+                row = cursor.fetchone()
+                state["image"] = row[0] if row else ""
+            except Exception as e:
+                print(f"[popular_states] image lookup failed for {state['name']}: {e}")
+                state["image"] = ""
+            state.pop("id", None)
+        return states
     finally:
         cursor.close()
         conn.close()

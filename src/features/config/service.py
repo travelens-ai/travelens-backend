@@ -7,6 +7,7 @@ can be changed without a deploy.
 
 from core.db import fetch_dicts
 from core.ads import get_ads_config, interleave_ads, get_inline_ads_config
+from core.images import with_image_urls
 
 APP_CONFIG = {
     "pages": [
@@ -213,9 +214,41 @@ def get_config():
     config["group_types"] = group_types
     config["food_preferences"] = food_preferences
     config["activities"] = activities
+    config["budgetType"] = [
+        {
+            "name": "Budget",
+            "hotel": "Under ₹2000",
+            "breakfast": "Under ₹100",
+            "meals": "Under ₹200",
+            "dinner": "Under ₹200",
+        },
+        {
+            "name": "Mid Range",
+            "hotel": "₹1500 - ₹3000",
+            "breakfast": "₹100 - ₹200",
+            "meals": "₹200 - ₹300",
+            "dinner": "₹200 - ₹300",
+        },
+        {
+            "name": "High Range",
+            "hotel": "₹3000 - ₹7000",
+            "breakfast": "₹200 - ₹400",
+            "meals": "₹300 - ₹600",
+            "dinner": "₹300 - ₹600",
+        },
+        {
+            "name": "Luxury",
+            "hotel": "Above ₹7000",
+            "breakfast": "Above ₹400",
+            "meals": "Above ₹600",
+            "dinner": "Above ₹600",
+        },
+    ]
     # Ad slots interleaved between the popular states, with the matching inline
     # slot config alongside them. Page-level (sticky/interstitial) ads stay in
     # the `ads` block; inline configs travel with the content that carries them.
+    # URL-prefix each state's bare `image` name before interleaving ads.
+    popular_states = with_image_urls(popular_states)
     config["popular_states"] = interleave_ads(popular_states, "popular_states")
     config["popular_states_ads"] = get_inline_ads_config("popular_states")
     config["ads"] = get_ads_config()
