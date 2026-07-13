@@ -107,31 +107,25 @@ def _inject_itinerary_ads(response):
 
 
 def _decompose_response_events(response, itinerary_id, skip_events=None):
-    """Yield granular SSE event dicts from a finalized itinerary response, in
-    this order:
-      1. ads_config   — inline ad slot config
-      2. info         — name/title, description, city, state, totals, notes
-      3. images       — the main destination image gallery
-      4. hotels       — trip-level hotels (one event, all 3 options)
-      5. per day:
-           day_info   — the day's theme + day_summary (emitted first)
+    """Yield granular SSE events from a FINALIZED itinerary — used to replay a
+    cached itinerary so it looks identical to a fresh incremental stream. Order:
+      1. info         — name/description/city/state/price/total_days/notes
+      2. images       — the main destination image gallery
+      3. hotels       — trip-level hotels (one event)
+      4. similar_place— one per similar place
+      5. per day (1, 2, ...):
+           day_info   — the day's theme + day_summary
            place      — each place_to_visit, one per event
-           ad         — ad slot between places and meals
-           meal       — breakfast/lunch/dinner, one per event (with slot field)
-      6. similar_place— each similar place, one per event
-      7. available_places — not-yet-used places the client can add (one event)
-      8. done         — terminal marker carrying itinerary_id
-    `skip_events` is a set of event names to omit. Images are already
-    URL-prefixed by the caller (with_image_urls)."""
+           ad         — section ad after the day's places
+           meal       — breakfast/lunch/dinner, one per event
+      6. available_places — not-yet-used places (one event)
+      7. done         — terminal marker carrying itinerary_id
+    Images are already URL-prefixed by the caller (with_image_urls)."""
     skip_events = skip_events or set()
     data = response.get("data", {}) if isinstance(response, dict) else {}
     itinerary = data.get("detailed_itinerary", {}) or {}
 
-    # 0. Inline ad slot config.
-    if "ads_config" not in skip_events:
-        yield {"event": "ads_config", "ads": get_inline_ads_config("itinerary_section")}
-
-    # 1. Top-level info.
+    # 1. Trip info.
     if "info" not in skip_events:
         yield {
             "event": "info",
@@ -153,14 +147,16 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     if trip_hotels:
         yield {"event": "hotels", "hotels": trip_hotels}
 
-    # 4. Day by day: day_info (theme/summary) → places → ad → meals.
+    # 4. Similar places, one per event.
+    for similar in itinerary.get("similar_places", []):
+        yield {"event": "similar_place", "item": similar}
+
+    # 5. Day by day: day_info (theme/summary) → places → ad → meals.
     for day in itinerary.get("itinerary", []):
         day_no = day.get("day")
         places = day.get("places_to_visit", [])
         meals = day.get("meals", {})
 
-        # Per-day header carrying the day's theme and one-line summary, emitted
-        # before the day's places so the client can render the day heading.
         yield {
             "event": "day_info",
             "day": day_no,
@@ -177,10 +173,6 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
             meal = meals.get(slot)
             if meal and isinstance(meal, dict) and meal.get("name"):
                 yield {"event": "meal", "day": day_no, "slot": slot, "item": meal}
-
-    # 5. Similar places, one per event.
-    for similar in itinerary.get("similar_places", []):
-        yield {"event": "similar_place", "item": similar}
 
     # 6. Available (not-yet-used) places the client can add to the trip.
     if "available_places" not in skip_events:
@@ -260,23 +252,22 @@ def generate_itinerary_stream():
                 return
 
             for ev in itinerary_service.recommender.generate_itinerary_stream(user_preferences):
-                if ev.get("event") == "complete":
+                event = ev.get("event")
+                if event == "complete":
+                    # Days were already streamed incrementally. Persist the full
+                    # result and emit the terminal `done` marker with the id.
                     result = ev.get("data")
                     itinerary_id = itinerary_service.store_itinerary(cache_key, user_preferences, result)
-                    response = with_image_urls(result) if isinstance(result, dict) else result
-                    # The image gallery was already streamed early; skip it here
-                    # to avoid a duplicate. `info` is re-sent with the LLM's
-                    # authoritative description/price once the plan is built.
-                    for piece in _decompose_response_events(response, itinerary_id,
-                                                            skip_events={"images"}):
-                        yield _sse(piece)
-                elif ev.get("event") == "images":
-                    # Early destination gallery — URL-prefix it like the rest.
-                    ev = {**ev, "images": with_image_urls(ev.get("images", []))}
+                    yield _sse({"event": "done", "itinerary_id": itinerary_id})
+                elif event == "ad_slot":
+                    # Model signals an ad slot; the route owns ad config.
+                    yield _sse({"event": "ad", "day": ev.get("day"), "item": section_ad()})
+                elif event in ("progress", "error"):
                     yield _sse(ev)
                 else:
-                    # progress / info / error events pass straight through
-                    yield _sse(ev)
+                    # info / images / hotels / similar_place / day_info / place /
+                    # meal / available_places — URL-prefix any bare image names.
+                    yield _sse(with_image_urls(ev))
         except Exception as e:
             print(f"Error streaming itinerary: {e}")
             yield _sse({"event": "error", "message": str(e)})
