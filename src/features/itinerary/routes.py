@@ -36,6 +36,8 @@ def generate_itinerary():
             budget: "25000"
             suggested_places: []
             hotel_preference: "mid"
+            arrival_time: "06:00"
+            departure_time: "15:00"
     responses:
       200:
         description: Itinerary generated
@@ -92,10 +94,11 @@ def _inject_itinerary_ads(response):
         return response
     itinerary = response.get("data", {}).get("detailed_itinerary", {}) or {}
     for day in itinerary.get("itinerary", []):
-        places = day.get("places_to_visit") or []
-        meals = day.get("meals") or {}
+        timeline = day.get("timeline") or []
+        has_places = any(i.get("type") == "place" for i in timeline)
+        has_meals  = any(i.get("type") == "meal"  for i in timeline)
         section_ads = {}
-        if places and meals:
+        if has_places and has_meals:
             section_ads["after_places"] = section_ad()
         if section_ads:
             day["section_ads"] = section_ads
@@ -109,17 +112,17 @@ def _inject_itinerary_ads(response):
 def _decompose_response_events(response, itinerary_id, skip_events=None):
     """Yield granular SSE events from a FINALIZED itinerary — used to replay a
     cached itinerary so it looks identical to a fresh incremental stream. Order:
-      1. info         — name/description/city/state/price/total_days/notes
-      2. images       — the main destination image gallery
-      3. hotels       — trip-level hotels (one event)
-      4. similar_place— one per similar place
+      1. info           — name/description/city/state/price/total_days/notes
+      2. images         — the main destination image gallery
+      3. hotels         — trip-level grouped hotels (one event)
+      4. similar_place  — one per similar place
       5. per day (1, 2, ...):
-           day_info   — the day's theme + day_summary
-           place      — each place_to_visit, one per event
-           ad         — section ad after the day's places
-           meal       — breakfast/lunch/dinner, one per event
+           day_info     — the day's theme + day_summary
+           timeline_item— one per timeline item (place/meal/hotel)
+           ad           — section ad after a day with both places and meals
+           meal_options — swappable restaurant alternatives per slot
       6. available_places — not-yet-used places (one event)
-      7. done         — terminal marker carrying itinerary_id
+      7. done           — terminal marker carrying itinerary_id
     Images are already URL-prefixed by the caller (with_image_urls)."""
     skip_events = skip_events or set()
     data = response.get("data", {}) if isinstance(response, dict) else {}
@@ -142,7 +145,7 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     if "images" not in skip_events:
         yield {"event": "images", "images": itinerary.get("images", [])}
 
-    # 3. Trip-level hotels (one event, emitted once for the whole trip).
+    # 3. Trip-level hotels (grouped format: city/selected/alternatives).
     trip_hotels = itinerary.get("hotels", [])
     if trip_hotels:
         yield {"event": "hotels", "hotels": trip_hotels}
@@ -151,11 +154,12 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
     for similar in itinerary.get("similar_places", []):
         yield {"event": "similar_place", "item": similar}
 
-    # 5. Day by day: day_info (theme/summary) → places → ad → meals.
+    # 5. Day by day: day_info → timeline items → ad → meal_options.
     for day in itinerary.get("itinerary", []):
         day_no = day.get("day")
-        places = day.get("places_to_visit", [])
-        meals = day.get("meals", {})
+        timeline = day.get("timeline", []) or []
+        has_places = any(i.get("type") == "place" for i in timeline)
+        has_meals  = any(i.get("type") == "meal"  for i in timeline)
 
         yield {
             "event": "day_info",
@@ -164,15 +168,15 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
             "day_summary": day.get("day_summary", ""),
         }
 
-        for place in places:
-            yield {"event": "place", "day": day_no, "item": place}
-        if places and meals:
+        for item in timeline:
+            yield {"event": "timeline_item", "day": day_no, "item": item}
+
+        if has_places and has_meals:
             yield {"event": "ad", "day": day_no, "item": section_ad()}
 
-        for slot in ("breakfast", "lunch", "dinner"):
-            meal = meals.get(slot)
-            if meal and isinstance(meal, dict) and meal.get("name"):
-                yield {"event": "meal", "day": day_no, "slot": slot, "item": meal}
+        meal_options = day.get("meal_options", {})
+        if meal_options:
+            yield {"event": "meal_options", "day": day_no, "options": meal_options}
 
     # 6. Available (not-yet-used) places the client can add to the trip.
     if "available_places" not in skip_events:
@@ -213,6 +217,8 @@ def generate_itinerary_stream():
             budget: "30000"
             suggested_places: []
             hotel_preference: "mid"
+            arrival_time: "10:00"
+            departure_time: "16:00"
     responses:
       200:
         description: text/event-stream of progress events then the itinerary, streamed in pieces

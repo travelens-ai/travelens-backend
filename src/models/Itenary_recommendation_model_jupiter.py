@@ -533,13 +533,13 @@ class ItenaryRecommendationSystem:
 
         # Step 1: Try to match on city first
         edit_places = self.places_df[
-            self.places_df['city'].str.lower() == city.lower()
+            self.places_df['city'].fillna('').astype(str).str.lower() == city.lower()
         ]
 
         if edit_places.empty:
             # If no city matches, fall back to matching by state
             edit_places = self.places_df[
-                self.places_df['state'].str.lower() == state.lower()
+                self.places_df['state'].fillna('').astype(str).str.lower() == state.lower()
             ]
 
 
@@ -592,9 +592,9 @@ class ItenaryRecommendationSystem:
                 fut_places = ex.submit(self._get_place_recommendations, user_preferences)
                 fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
                 fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
-                places      = fut_places.result()
-                hotels      = fut_hotels.result()
-                restaurants = fut_rests.result()
+                places                    = fut_places.result()
+                hotels                    = fut_hotels.result()
+                restaurants, rest_slots   = fut_rests.result()
 
             # Enrich images in background — benefits the next request; not needed for current response
             threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
@@ -605,6 +605,7 @@ class ItenaryRecommendationSystem:
                 places,
                 hotels,
                 restaurants,
+                rest_slot_counts=rest_slots,
             )
 
             return self._finalize_itinerary(itinerary, places, start_date=user_preferences.get('start_date'), user_preferences=user_preferences)
@@ -644,9 +645,9 @@ class ItenaryRecommendationSystem:
                 fut_places = ex.submit(self._get_place_recommendations, user_preferences)
                 fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
                 fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
-                places      = fut_places.result()
-                hotels      = fut_hotels.result()
-                restaurants = fut_rests.result()
+                places                    = fut_places.result()
+                hotels                    = fut_hotels.result()
+                restaurants, rest_slots   = fut_rests.result()
 
             threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
             yield {'event': 'progress', 'step': 'places', 'message': 'Found places to visit'}
@@ -688,6 +689,7 @@ class ItenaryRecommendationSystem:
             yield {'event': 'images', 'images': itinerary.get('images', [])}
 
             # 4. Trip-level hotels (finalize lat/lon on them via a hotels-only ctx).
+            # Hotels are now grouped: [{city, from_day, to_day, selected, alternatives}].
             trip_hotels = itinerary.get('hotels', []) or []
             if trip_hotels:
                 hotel_ctx = {'city': itinerary.get('city'), 'state': itinerary.get('state'),
@@ -718,7 +720,7 @@ class ItenaryRecommendationSystem:
                         extra = self._generate_extra_days(
                             user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
                             start_day=day_no, num_days=1, used_places=used_places,
-                            itinerary=itinerary,
+                            itinerary=itinerary, rest_slot_counts=rest_slots,
                         )
                     except Exception as day_err:
                         print(f"[stream] day {day_no} attempt {attempt + 1} raised: {day_err}")
@@ -743,18 +745,17 @@ class ItenaryRecommendationSystem:
                 # Stream this day's granular events.
                 yield {'event': 'day_info', 'day': day_no,
                        'theme': day.get('theme', ''), 'day_summary': day.get('day_summary', '')}
-                places_list = day.get('places_to_visit', []) or []
-                for place in places_list:
-                    yield {'event': 'place', 'day': day_no, 'item': place}
-                meals = day.get('meals', {}) or {}
-                # Signal the route to insert a section ad after this day's
-                # places (the route owns ad config / section_ad).
-                if places_list and meals:
+                timeline = day.get('timeline', []) or []
+                has_places = any(i.get('type') == 'place' for i in timeline)
+                has_meals  = any(i.get('type') == 'meal'  for i in timeline)
+                for item in timeline:
+                    yield {'event': 'timeline_item', 'day': day_no, 'item': item}
+                # Signal the route to insert a section ad after this day's content.
+                if has_places and has_meals:
                     yield {'event': 'ad_slot', 'day': day_no}
-                for slot in ('breakfast', 'lunch', 'dinner'):
-                    meal = meals.get(slot)
-                    if meal and isinstance(meal, dict) and meal.get('name'):
-                        yield {'event': 'meal', 'day': day_no, 'slot': slot, 'item': meal}
+                meal_options = day.get('meal_options', {})
+                if meal_options:
+                    yield {'event': 'meal_options', 'day': day_no, 'options': meal_options}
 
             itinerary['itinerary'] = built_days
             itinerary['total_days'] = len(built_days)
@@ -813,16 +814,17 @@ class ItenaryRecommendationSystem:
                 fut_places = ex.submit(self._get_place_recommendations, user_preferences)
                 fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
                 fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
-                places      = fut_places.result()
-                hotels      = fut_hotels.result()
-                restaurants = fut_rests.result()
+                places                    = fut_places.result()
+                hotels                    = fut_hotels.result()
+                restaurants, rest_slots   = fut_rests.result()
             threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
 
             places_trimmed = self._trim_for_prompt(places, self._PLACE_COLS_PROMPT, 60)
             hotels_trimmed = self._trim_for_prompt(hotels, self._HOTEL_COLS_PROMPT, 60)
             rests_trimmed  = self._trim_for_prompt(restaurants, self._REST_COLS_PROMPT, 60)
             messages = self.generate_edit_itinerary_prompt(
-                user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names
+                user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names,
+                rest_slot_counts=rest_slots,
             )
             print(f"Edit prompt length: {sum(len(m['content']) for m in messages)} chars")
 
@@ -830,6 +832,7 @@ class ItenaryRecommendationSystem:
                 model=self.chat_deployment,
                 input=messages,
                 max_output_tokens=self.max_tokens,
+                text={"format": {"type": "json_object"}},
             )
             response_text = self._extract_completed_json(response)
             try:
@@ -854,10 +857,11 @@ class ItenaryRecommendationSystem:
         enriched to the same shape as places_to_visit entries."""
         used_names = set()
         for day in itinerary.get('itinerary', []):
-            for p in day.get('places_to_visit', []):
-                n = p.get('name', '').strip()
-                if n:
-                    used_names.add(n.lower())
+            for item in day.get('timeline', []):
+                if item.get('type') == 'place':
+                    n = item.get('name', '').strip()
+                    if n:
+                        used_names.add(n.lower())
 
         scored_df = self._get_place_recommendations(user_preferences)
         remaining_df = scored_df[
@@ -893,7 +897,7 @@ class ItenaryRecommendationSystem:
         _wrapper = {
             'city': itinerary.get('city', ''),
             'state': itinerary.get('state', ''),
-            'itinerary': [{'places_to_visit': places_list}],
+            'itinerary': [{'timeline': [dict(p, type='place') for p in places_list]}],
             'hotels': [],
         }
         self._attach_lat_long(_wrapper)
@@ -984,15 +988,17 @@ class ItenaryRecommendationSystem:
         # fallback map (built in _finalize_trip_level).
         fallback_map = getattr(self, '_place_image_fallback', {}) or {}
         all_place_names = [
-            str(place.get('name', '')).strip()
+            str(item.get('name', '')).strip()
             for day in days
-            for place in day.get('places_to_visit', [])
-            if str(place.get('name', '')).strip()
+            for item in day.get('timeline', [])
+            if item.get('type') == 'place' and str(item.get('name', '')).strip()
         ]
         place_images_db = self._get_images_for_places(all_place_names) if all_place_names else {}
         for day in days:
-            for place in day.get('places_to_visit', []):
-                place_name = str(place.get('name', '')).strip()
+            for item in day.get('timeline', []):
+                if item.get('type') != 'place':
+                    continue
+                place_name = str(item.get('name', '')).strip()
                 key = place_name.lower()
                 images = place_images_db.get(key, [])[:5]
                 if not images:
@@ -1003,7 +1009,7 @@ class ItenaryRecommendationSystem:
                         images = [single]
                 if not images:
                     images = ['default' + str(random.randint(1, 7)) + '.webp']
-                place['images'] = images
+                item['images'] = images
 
         # Build a temporary itinerary containing ONLY these days so the existing
         # per-itinerary helpers (which iterate itinerary['itinerary']) operate on
@@ -1189,34 +1195,35 @@ class ItenaryRecommendationSystem:
             for r in self.places_df.to_dict(orient="records")
         }
         for day in itinerary.get("itinerary", []):
-            for place in day.get("places_to_visit", []):
-                key = str(place.get("name", "")).strip().lower()
+            for item in day.get("timeline", []):
+                if item.get("type") != "place":
+                    continue
+                key = str(item.get("name", "")).strip().lower()
                 db = db_lookup.get(key)
                 if not db:
                     continue
                 # Override LLM-generated fields with authoritative Google data
                 if db.get("opening_hours"):
-                    place["opening_hours"] = db["opening_hours"]
+                    item["opening_hours"] = db["opening_hours"]
                 if db.get("website_uri"):
-                    place["website_uri"] = db["website_uri"]
+                    item["website_uri"] = db["website_uri"]
                 if db.get("phone_number"):
-                    place["phone_number"] = db["phone_number"]
+                    item["phone_number"] = db["phone_number"]
                 # UI-only fields — never in the prompt, attached here for the frontend
                 if db.get("google_maps_uri"):
-                    place["google_maps_uri"] = db["google_maps_uri"]
-
+                    item["google_maps_uri"] = db["google_maps_uri"]
                 if db.get("full_address"):
-                    place["full_address"] = db["full_address"]
+                    item["full_address"] = db["full_address"]
                 if db.get("good_for_children") is not None:
-                    place["good_for_children"] = db["good_for_children"]
+                    item["good_for_children"] = db["good_for_children"]
                 if db.get("accessibility"):
-                    place["accessibility"] = db["accessibility"]
+                    item["accessibility"] = db["accessibility"]
                 # Extra detail fields for place detail screen
-                place["editorial_summary"] = db.get("editorial_summary") or ""
-                place["review_summary"] = db.get("review_summary") or ""
-                place["short_formatted_address"] = db.get("short_formatted_address") or ""
-                place["google_rating"] = db.get("google_rating")
-                place["google_rating_count"] = db.get("google_rating_count")
+                item["editorial_summary"] = db.get("editorial_summary") or ""
+                item["review_summary"] = db.get("review_summary") or ""
+                item["short_formatted_address"] = db.get("short_formatted_address") or ""
+                item["google_rating"] = db.get("google_rating")
+                item["google_rating_count"] = db.get("google_rating_count")
 
     def _attach_lat_long(self, itinerary):
         """Populate `lat`/`lon`/`full_address` on every place, restaurant and
@@ -1246,13 +1253,25 @@ class ItenaryRecommendationSystem:
         default_hint = ", ".join([p for p in [city, state] if p])
 
         for day in itinerary.get('itinerary', []):
-            for place in day.get('places_to_visit', []):
-                apply(place, 'places', default_hint)
-            for meal in day.get('meals', {}).values():
-                if isinstance(meal, dict):
-                    apply(meal, 'restaurants', default_hint)
-        for hotel in itinerary.get('hotels', []):
-            apply(hotel, 'hotels', default_hint)
+            for item in day.get('timeline', []):
+                t = item.get('type')
+                if t == 'place':
+                    apply(item, 'places', default_hint)
+                elif t == 'meal':
+                    apply(item, 'restaurants', default_hint)
+                # hotel check_in/check_out items don't need lat/lon individually
+            for slot_opts in day.get('meal_options', {}).values():
+                for opt in (slot_opts or []):
+                    if isinstance(opt, dict):
+                        apply(opt, 'restaurants', default_hint)
+        for hotel_group in itinerary.get('hotels', []):
+            if isinstance(hotel_group, dict):
+                sel = hotel_group.get('selected')
+                if isinstance(sel, dict):
+                    apply(sel, 'hotels', default_hint)
+                for alt in hotel_group.get('alternatives', []):
+                    if isinstance(alt, dict):
+                        apply(alt, 'hotels', default_hint)
 
     def _compute_travel_times(self, itinerary):
         """Overwrite LLM-guessed travel_from_prev with real haversine estimates.
@@ -1267,20 +1286,25 @@ class ItenaryRecommendationSystem:
             return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 
         for day in itinerary.get('itinerary', []):
-            places = day.get('places_to_visit', [])
-            for i, place in enumerate(places):
+            # Only items with real lat/lon get overwritten haversine travel times.
+            # Hotel items typically lack lat/lon so they're skipped gracefully.
+            locatable = [
+                item for item in day.get('timeline', [])
+                if item.get('lat') is not None and item.get('lon') is not None
+            ]
+            for i, item in enumerate(locatable):
                 if i == 0:
-                    place['travel_from_prev'] = None
+                    item['travel_from_prev'] = None
                     continue
-                prev = places[i - 1]
+                prev = locatable[i - 1]
                 try:
                     dist_km = haversine(
                         float(prev['lat']), float(prev['lon']),
-                        float(place['lat']), float(place['lon'])
+                        float(item['lat']), float(item['lon'])
                     )
                     mins = max(5, int(dist_km / 30 * 60))
                     mode = 'walking' if dist_km < 1.5 else 'auto' if dist_km < 4 else 'cab'
-                    place['travel_from_prev'] = {
+                    item['travel_from_prev'] = {
                         'duration_mins': mins,
                         'mode': mode,
                         'note': f'~{mins} min by {mode} from {prev["name"]}'
@@ -1302,12 +1326,13 @@ class ItenaryRecommendationSystem:
         except ValueError:
             return
 
-        # Collect all tasks: (place_obj, day_index, day_date_str)
+        # Collect all tasks: (item_obj, day_index, day_date_str) — place items only
         tasks = []
         for i, day in enumerate(itinerary.get('itinerary', [])):
             day_date = (trip_start + timedelta(days=i)).strftime("%Y-%m-%d")
-            for place in day.get('places_to_visit', []):
-                tasks.append((place, i, day_date))
+            for item in day.get('timeline', []):
+                if item.get('type') == 'place':
+                    tasks.append((item, i, day_date))
 
         if not tasks:
             return
@@ -1346,7 +1371,7 @@ class ItenaryRecommendationSystem:
         user_embedding = self._generate_user_embedding(user_preferences)
         user_embedding = user_embedding / norm(user_embedding)
 
-        top_places = self.places_df
+        top_places = self.places_df.copy()
 
         top_places['image'] = top_places['image'].apply(
             lambda x: x if isinstance(x, str) and x.endswith('.webp') else None
@@ -1370,8 +1395,8 @@ class ItenaryRecommendationSystem:
 
         # Step 1: Try to match on city first (exact match to avoid e.g. "goa" matching "goalpara")
         city_matches = top_places[
-            top_places['city'].str.lower().apply(
-                lambda city: any(part == str(city).lower() for part in location_parts)
+            top_places['city'].fillna('').astype(str).str.lower().apply(
+                lambda city: any(part == city for part in location_parts)
             )
         ]
 
@@ -1381,8 +1406,8 @@ class ItenaryRecommendationSystem:
         else:
             # Otherwise fall back to matching by state (exact match)
             top_places = top_places[
-                top_places['state'].str.lower().apply(
-                    lambda state: any(part == str(state).lower() for part in location_parts) )
+                top_places['state'].fillna('').astype(str).str.lower().apply(
+                    lambda state: any(part == state for part in location_parts))
             ].copy()
 
         # Calculate average rating for all restaurants (or set a constant)
@@ -1429,19 +1454,29 @@ class ItenaryRecommendationSystem:
                     places_df.at[idx, 'image'] = url
         return places_df
 
-    # Star-rating bands that define each hotel tier.
+    # Star-rating bands that define each hotel tier (4 tiers).
     _HOTEL_TIER_STARS = {
         'budget':  (0, 2),
         'mid':     (3, 3),
-        'luxury':  (4, 5),
+        'high':    (4, 4),
+        'luxury':  (5, 5),
+    }
+
+    # Per-meal cost caps in INR for hard restaurant pre-filtering by budget tier.
+    # Tuple: (breakfast_max, lunch_max, dinner_max). NULL/0 cost rows are always kept.
+    _MEAL_COST_CAPS = {
+        'budget':  (200,  350,  400),
+        'mid':     (400,  700,  700),
+        'high':    (700,  1200, 1500),
+        'luxury':  (1200, 2500, 9999),
     }
 
     def _get_hotel_recommendations(self, user_preferences):
-        """Get hotel recommendations based on selected places.
+        """Get hotel recommendations hard-filtered to the user's budget tier.
 
-        Always returns all tiers so the LLM has real data for each tier bucket.
-        When `hotel_preference` is set, preferred-tier rows are sorted to the
-        top so the LLM encounters them first (prompt rule handles emphasis).
+        A budget user never sees luxury properties in their options. Falls back
+        to ±1 star if fewer than 3 hotels match the exact tier so the LLM
+        always has enough data to populate all hotel groups.
         """
         poi = user_preferences["places_of_interest"]
         city = ", ".join(poi) if isinstance(poi, list) else str(poi)
@@ -1453,35 +1488,84 @@ class ItenaryRecommendationSystem:
         # City-only match (state bleed excluded — see comment in git history).
         city_part = city.split(',')[0].strip().lower()
         top_hotels = self.hotels_df[
-            self.hotels_df['city'].str.lower().str.contains(city_part, na=False) |
-            self.hotels_df['address'].str.lower().str.contains(city_part, na=False)
+            self.hotels_df['city'].fillna('').astype(str).str.lower().str.contains(city_part, na=False) |
+            self.hotels_df['address'].fillna('').astype(str).str.lower().str.contains(city_part, na=False)
         ].sort_values('site_review_rating', ascending=False)
 
         pref = str(user_preferences.get('hotel_preference') or '').strip().lower()
         if pref in self._HOTEL_TIER_STARS:
             lo, hi = self._HOTEL_TIER_STARS[pref]
-            is_pref = top_hotels['hotel_star_rating'].between(lo, hi, inclusive='both')
-            # Float preferred tier to the top; all other rows follow sorted by rating.
-            top_hotels = pd.concat([
-                top_hotels[is_pref],
-                top_hotels[~is_pref],
-            ]).reset_index(drop=True)
+            in_tier = top_hotels[top_hotels['hotel_star_rating'].between(lo, hi, inclusive='both')]
+            # Fallback: widen by ±1 star so LLM always has ≥3 hotels to work with.
+            if len(in_tier) < 3:
+                in_tier = top_hotels[
+                    top_hotels['hotel_star_rating'].between(max(0, lo - 1), min(5, hi + 1), inclusive='both')
+                ]
+            top_hotels = in_tier.reset_index(drop=True)
 
         return top_hotels.head(100)
 
-
     def _get_restaurant_recommendations(self, user_preferences):
-        """Get restaurant recommendations based on location and preferences"""
+        """Get restaurant recommendations filtered and annotated by budget tier.
+
+        Returns a tuple (DataFrame, slot_counts) where:
+          - DataFrame has a `suitable_slots` column ("breakfast,lunch,dinner" /
+            "lunch,dinner" / "dinner") derived from the Cost column and the
+            user's tier caps. Rows with no cost data keep all slots.
+          - slot_counts is {"breakfast": n, "lunch": n, "dinner": n} — tells
+            prompt-builders how many options exist per slot so the LLM knows
+            when to supplement from its own knowledge.
+
+        Cost note: the `Cost` column stores "cost for two" in INR. The
+        breakfast/lunch/dinner caps in _MEAL_COST_CAPS are per-person, so we
+        double them before comparing (cost-for-two ≤ 2 × per-person cap).
+        """
         poi = user_preferences["places_of_interest"]
         city = ", ".join(poi) if isinstance(poi, list) else str(poi)
         cuisine_raw = user_preferences["food_preferences"]
         cuisine = ", ".join(cuisine_raw) if isinstance(cuisine_raw, list) else str(cuisine_raw)
 
+        pref = str(user_preferences.get('hotel_preference') or '').strip().lower()
+        caps = self._MEAL_COST_CAPS.get(pref)
+
+        def _annotate_and_count(df):
+            """Add suitable_slots column and return (df, slot_counts)."""
+            df = df.copy()
+            if caps and 'Cost' in df.columns:
+                b_max, l_max, d_max = caps
+                # Cost column is "cost for two" — double the per-person caps.
+                b2, l2, d2 = b_max * 2, l_max * 2, d_max * 2
+                cost_col = pd.to_numeric(df['Cost'], errors='coerce')
+                unknown = cost_col.isna() | (cost_col == 0)
+
+                # Hard drop: restaurants above 2× dinner_max are never affordable.
+                df = df[unknown | (cost_col <= d2)].copy()
+                cost_col = pd.to_numeric(df['Cost'], errors='coerce')
+                unknown = cost_col.isna() | (cost_col == 0)
+
+                def _slots(c):
+                    if pd.isna(c) or c == 0: return 'breakfast,lunch,dinner'
+                    if c <= b2:              return 'breakfast,lunch,dinner'
+                    if c <= l2:             return 'lunch,dinner'
+                    return 'dinner'
+                df['suitable_slots'] = cost_col.apply(_slots)
+            else:
+                df['suitable_slots'] = 'breakfast,lunch,dinner'
+
+            slots_str = df['suitable_slots'].astype(str)
+            slot_counts = {
+                'breakfast': int(slots_str.str.contains('breakfast').sum()),
+                'lunch':     int(slots_str.str.contains('lunch').sum()),
+                'dinner':    int(slots_str.str.contains('dinner').sum()),
+            }
+            return df, slot_counts
+
         live_restaurants = self.places_client.search_restaurants(city, cuisine)
         if live_restaurants:
-            return pd.DataFrame(live_restaurants).head(100)
+            df = pd.DataFrame(live_restaurants).head(100)
+            return _annotate_and_count(df)
 
-        # Fallback to CSV data — city-only match, same rationale as hotels.
+        # Fallback to CSV/DB data — city-only match, same rationale as hotels.
         preferred_cuisines = [self.normalize(c) for c in cuisine.split(',')]
         city_part = self.normalize(city.split(',')[0])
         cuisine_pattern = '|'.join(preferred_cuisines)
@@ -1494,11 +1578,13 @@ class ItenaryRecommendationSystem:
         top_restaurants = top_restaurants.drop_duplicates(subset=['Name'], keep='first')
 
         C = top_restaurants['Rating'].mean()
+        top_restaurants = top_restaurants.copy()
         top_restaurants['rating_score'] = top_restaurants.apply(
             lambda x: self.weighted_restaurants_rating(x, C), axis=1
         )
+        top_restaurants = top_restaurants.sort_values('rating_score', ascending=False)
 
-        return top_restaurants.sort_values('rating_score', ascending=False).head(100)
+        return _annotate_and_count(top_restaurants.head(100))
 
 
 
@@ -1545,7 +1631,7 @@ class ItenaryRecommendationSystem:
         'suitable_for',             # derived from prefer_* flags — group suitability (100%)
     ]
     _HOTEL_COLS_PROMPT = ['property_name', 'city', 'hotel_star_rating', 'site_review_rating', 'property_type', 'pageurl']
-    _REST_COLS_PROMPT  = ['Name', 'City', 'Cuisine', 'Rating', 'Cost', 'Locality']
+    _REST_COLS_PROMPT  = ['Name', 'City', 'Cuisine', 'Rating', 'Votes', 'Cost', 'Locality', 'suitable_slots']
 
     def _trim_for_prompt(self, df, cols, n):
         available = [c for c in cols if c in df.columns]
@@ -1766,6 +1852,7 @@ class ItenaryRecommendationSystem:
             model=self.chat_deployment,
             input=messages,
             max_output_tokens=self.max_tokens,
+            text={"format": {"type": "json_object"}},
         )
         response_text = self._extract_completed_json(response)
         # The skeleton has NO `itinerary` key, so parse the first balanced JSON
@@ -1795,6 +1882,15 @@ class ItenaryRecommendationSystem:
 
     def generate_trip_skeleton_prompt(self, user_preferences, top_places, top_restaurants, top_hotels):
         trip_duration = user_preferences['trip_duration']
+        hotel_pref = str(user_preferences.get('hotel_preference') or 'mid').strip().lower()
+        tier_table = (
+            "| tier    | hotel/night      |\n"
+            "|---------|------------------|\n"
+            "| budget  | <₹1,500          |\n"
+            "| mid     | ₹1,500–₹4,500    |\n"
+            "| high    | ₹4,500–₹10,000   |\n"
+            "| luxury  | ₹10,000+         |"
+        )
         system_content = """You are a senior human trip planner. Produce ONLY the trip-level summary
 for a multi-day trip — NOT the day-by-day plan.
 
@@ -1814,16 +1910,22 @@ missing strings. No comments inside JSON."""
 - Trip type: {user_preferences['trip_type']}
 - Trip duration: {trip_duration} days
 - Budget: {user_preferences['budget']}
+- Hotel preference tier: {hotel_pref}
 
 ## Hotels Dataset (prefer these; supplement with your knowledge)
 {top_hotels}
 
+## Budget tiers
+{tier_table}
+The user's preferred tier is "{hotel_pref}". Make `selected` the best match for that tier.
+
 ## Rules
 1. Output ONLY the trip-level fields below — do NOT include any day-by-day `itinerary` array.
-2. Provide exactly 3 hotels (budget, mid, luxury) spanning the whole trip (from_day 1, to_day {trip_duration}).
-3. `description` is a short, engaging 2-3 sentence overview of the whole {trip_duration}-day trip.
-4. `price_estimated_range` is the total per-head estimate; keep within {user_preferences['budget']} if realistic, else show the real range.
-5. Provide 2-4 `similar_places`.
+2. Hotels are GROUPED by city. If the trip covers one city, provide one group. If multi-city (e.g. Rajasthan covering Jaipur + Jodhpur), provide one group per city with the correct from_day/to_day range.
+3. Each hotel group has `selected` (best pick for user's tier) and `alternatives` (1–2 other tier options). Pick from the Hotels Dataset; use your knowledge only if a tier has no dataset candidate.
+4. `description` is a short, engaging 2-3 sentence overview of the whole {trip_duration}-day trip.
+5. `price_estimated_range` is the total per-head estimate; keep within {user_preferences['budget']} if realistic, else show the real range.
+6. Provide 2-4 `similar_places`.
 
 ## Output Format (JSON)
 
@@ -1836,9 +1938,16 @@ missing strings. No comments inside JSON."""
   "notes": "",
   "price_estimated_range": "e.g. ₹12,000–₹18,000 per head",
   "hotels": [
-    {{"name": "Hotel Name", "type": "budget", "price_range": "₹1,000–₹3,000/night", "rating": "4.1", "location": "City, State", "reason": "Near key attractions", "from_day": 1, "to_day": {trip_duration}, "link": "https://..."}},
-    {{"name": "Hotel Name", "type": "mid", "price_range": "₹3,000–₹8,000/night", "rating": "4.3", "location": "City, State", "reason": "Good value", "from_day": 1, "to_day": {trip_duration}, "link": "https://..."}},
-    {{"name": "Hotel Name", "type": "luxury", "price_range": "₹8,000+/night", "rating": "4.6", "location": "City, State", "reason": "Premium stay", "from_day": 1, "to_day": {trip_duration}, "link": "https://..."}}
+    {{
+      "city": "City Name",
+      "from_day": 1,
+      "to_day": {trip_duration},
+      "selected": {{"name": "Best Hotel", "type": "{hotel_pref}", "price_range": "₹X–₹Y/night", "rating": "4.3", "location": "City, State", "reason": "Best match for your tier", "link": "https://..."}},
+      "alternatives": [
+        {{"name": "Budget Option", "type": "budget", "price_range": "₹800–₹1,500/night", "rating": "4.0", "location": "City, State", "reason": "Affordable, central", "link": "https://..."}},
+        {{"name": "Luxury Option", "type": "luxury", "price_range": "₹12,000+/night", "rating": "4.8", "location": "City, State", "reason": "Premium experience", "link": "https://..."}}
+      ]
+    }}
   ],
   "similar_places": [
     {{"placename": "Alternative 1", "description": "Why it fits", "state": "State Name", "price_estimated_range": "₹..."}},
@@ -1851,17 +1960,18 @@ missing strings. No comments inside JSON."""
             {"role": "user",   "content": user_content},
         ]
 
-    def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants):
+    def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants, rest_slot_counts=None):
         places_trimmed = self._trim_for_prompt(top_places, self._PLACE_COLS_PROMPT, 30)
         hotels_trimmed = self._trim_for_prompt(top_hotels, self._HOTEL_COLS_PROMPT, 10)
         rests_trimmed  = self._trim_for_prompt(top_restaurants, self._REST_COLS_PROMPT, 20)
-        messages = self.generate_travel_itinerary_prompt(user_preferences, places_trimmed, rests_trimmed, hotels_trimmed)
+        messages = self.generate_travel_itinerary_prompt(user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, rest_slot_counts=rest_slot_counts)
         print(f"Prompt length: {sum(len(m['content']) for m in messages)} chars")
 
         response = self.client.responses.create(
             model=self.chat_deployment,
             input=messages,
             max_output_tokens=self.max_tokens,
+            text={"format": {"type": "json_object"}},
         )
         response_text = self._extract_completed_json(response)
         try:
@@ -1879,10 +1989,11 @@ missing strings. No comments inside JSON."""
         # Enforce it programmatically: if it returned fewer days than asked,
         # generate the missing days with follow-up calls and merge them in.
         return self._ensure_full_days(
-            itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed
+            itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+            rest_slot_counts=rest_slot_counts,
         )
 
-    def _ensure_full_days(self, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed):
+    def _ensure_full_days(self, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, rest_slot_counts=None):
         """Guarantee the itinerary has `trip_duration` days.
 
         The LLM often returns fewer days than requested no matter how the prompt
@@ -1911,7 +2022,7 @@ missing strings. No comments inside JSON."""
             extra = self._generate_extra_days(
                 user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
                 start_day=len(days) + 1, num_days=missing, used_places=used_places,
-                itinerary=itinerary,
+                itinerary=itinerary, rest_slot_counts=rest_slot_counts,
             )
             if not extra:
                 print(f"[days] top-up call returned no new days (have {len(days)}/{target}); stopping.")
@@ -1930,20 +2041,22 @@ missing strings. No comments inside JSON."""
 
     @staticmethod
     def _collect_used_place_names(days):
-        """Names of all places already placed across the given day objects, so
-        follow-up generations can avoid repeating them."""
+        """Names of all place-type items already placed across the given day
+        objects, so follow-up generations can avoid repeating them."""
         names = []
         for day in days:
             if not isinstance(day, dict):
                 continue
-            for place in day.get('places_to_visit', []) or []:
-                name = str((place or {}).get('name', '')).strip()
+            for item in day.get('timeline', []) or []:
+                if not isinstance(item, dict) or item.get('type') != 'place':
+                    continue
+                name = str(item.get('name', '')).strip()
                 if name and name not in names:
                     names.append(name)
         return names
 
     def _generate_extra_days(self, user_preferences, top_places, top_restaurants, top_hotels,
-                             start_day, num_days, used_places, itinerary=None):
+                             start_day, num_days, used_places, itinerary=None, rest_slot_counts=None):
         """Ask the model for exactly `num_days` additional day objects, numbered
         from `start_day`, excluding already-used places. Returns a list of day
         dicts (possibly fewer than requested), or [] on failure. Token usage is
@@ -1951,12 +2064,14 @@ missing strings. No comments inside JSON."""
         messages = self.generate_extra_days_prompt(
             user_preferences, top_places, top_restaurants, top_hotels,
             start_day=start_day, num_days=num_days, used_places=used_places,
+            rest_slot_counts=rest_slot_counts,
         )
         print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
         response = self.client.responses.create(
             model=self.chat_deployment,
             input=messages,
             max_output_tokens=self.max_tokens,
+            text={"format": {"type": "json_object"}},
         )
         if itinerary is not None:
             self._accumulate_usage(itinerary, response)
@@ -1998,20 +2113,62 @@ missing strings. No comments inside JSON."""
         raise ValueError("Follow-up response did not contain a days array.")
 
     def generate_extra_days_prompt(self, user_preferences, top_places, top_restaurants, top_hotels,
-                                   start_day, num_days, used_places):
+                                   start_day, num_days, used_places, rest_slot_counts=None):
         used_block = ", ".join(used_places) if used_places else "(none yet)"
+        hotel_pref = str(user_preferences.get('hotel_preference') or 'mid').strip().lower()
+        tier_table = (
+            "| tier   | breakfast | lunch   | dinner  |\n"
+            "|--------|-----------|---------|----------|\n"
+            "| budget | <₹200     | <₹350   | <₹400    |\n"
+            "| mid    | <₹400     | <₹700   | <₹700    |\n"
+            "| high   | <₹700     | <₹1,200 | <₹1,500  |\n"
+            "| luxury | <₹1,200   | <₹2,500 | ₹3,000+  |"
+        )
 
-        system_content = """You are a senior human trip planner extending an existing itinerary with additional days.
+        system_content = f"""You are a senior human trip planner extending an existing itinerary with additional days.
 
-Your entire response must be a single raw JSON object with one key `itinerary` containing an array of the new day objects. Start with { and end with }. No markdown, no code fences, no explanation, no preamble.
+Your entire response must be a single raw JSON object with one key `itinerary` containing an array of the new day objects. Start with {{ and end with }}. No markdown, no code fences, no explanation, no preamble.
 
 No trailing commas. No NaN — use "" for missing strings, null for missing numbers. No comments inside JSON.
 
-Meals are part of the experience. Set realistic suggested_time for each meal:
-- Breakfast: 7:30–8:30 AM (30–45 min). Set suggested_time e.g. "8:00 AM".
-- Lunch: derive from morning schedule, typically 12:30–1:30 PM (60–75 min). Set suggested_time accordingly.
-- Dinner: after last place winds down, typically 7:30–9:00 PM (90 min). Set suggested_time accordingly.
-suggested_time is required on every meal slot."""
+## TIMELINE structure — all items in ONE flat array per day
+Each day's `timeline` is chronological. Every item has `type` (place / meal / hotel).
+- `place`: sightseeing stop
+- `meal`: includes `slot` ("breakfast"|"lunch"|"dinner")
+- `hotel`: check_in / check_out event with `event` field
+
+Every item needs: `type`, `name`, `suggested_time`, `duration`, `travel_from_prev`.
+Place items add: `location`, `reason`, `activities`, `rating`, `opening_hours`.
+Meal items add: `slot`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`.
+Hotel items add: `event`, `note`.
+
+`travel_from_prev` = null for first item of the day, otherwise {{"duration_mins": int, "mode": "walking|auto|cab", "note": "string"}}.
+
+## meal_options — swappable alternatives per slot
+Each day also has `meal_options` with "breakfast", "lunch", "dinner" arrays (2–3 alternatives each). No `travel_from_prev` on these.
+
+## Budget tier for meals: {hotel_pref}
+{tier_table}
+All `approx_cost` values (in timeline and meal_options) must stay within the "{hotel_pref}" tier caps above.
+
+## Smart timing rules
+- Sunrise spots (beaches, ghats, forts, hilltops): schedule before 6 AM if day warrants it; breakfast follows at ~7:30–8 AM.
+- Nightlife days: push dinner to 8–9 PM, add late-night venue after 10 PM, breakfast next day at 9–10 AM."""
+
+        caps = self._MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
+        b_cap, l_cap, d_cap = caps
+        sc = rest_slot_counts or {}
+        n_b, n_l, n_d = sc.get('breakfast', 0), sc.get('lunch', 0), sc.get('dinner', 0)
+        rest_coverage = (
+            f"Dataset coverage for {hotel_pref} tier: "
+            f"breakfast-eligible: {n_b}  |  lunch-eligible: {n_l}  |  dinner-eligible: {n_d}\n"
+            f"- Prefer restaurants with Votes > 100 (more reviews = more reliable rating).\n"
+            f"- Use the `suitable_slots` column to assign each restaurant to the correct meal slot.\n"
+            f"- Cost column is 'cost for two' in INR — a Cost of 400 means ₹200 per person.\n"
+            f"- If a slot has fewer than 3 dataset options, supplement with your own knowledge "
+            f"but still keep costs within ₹{b_cap}/₹{l_cap}/₹{d_cap} per person "
+            f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
+        )
 
         user_content = f"""Extend the itinerary with exactly {num_days} new day object(s), numbered {start_day} through {start_day + num_days - 1}.
 
@@ -2022,6 +2179,7 @@ suggested_time is required on every meal slot."""
 - Food preferences: {user_preferences['food_preferences']}
 - Trip type: {user_preferences['trip_type']}
 - Budget: {user_preferences['budget']}
+- Hotel preference tier: {hotel_pref}
 
 ## Places already used — DO NOT reuse any of these
 {used_block}
@@ -2032,16 +2190,17 @@ suggested_time is required on every meal slot."""
 ## Restaurants Dataset
 {top_restaurants}
 
+{rest_coverage}
+
 ## Hotels Dataset
 {top_hotels}
 
 ## Rules
 1. Generate EXACTLY {num_days} day object(s) numbered {start_day} to {start_day + num_days - 1}.
 2. Never reuse a place from the already-used list or repeat within these new days.
-3. Each day: 2–3 geographically close places, 3 meal slots (breakfast/lunch/dinner), no hotels inside days.
-4. For each place: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_start_time`, `travel_from_prev`.
-5. For each meal: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`.
-6. `suggested_time` on every meal is mandatory — derive from the day's actual time flow.
+3. Each day: as many geographically close places as fit (min 2), 3 meal slots in timeline, meal_options dict.
+4. NO separate `places_to_visit` or `meals` dict — everything goes into `timeline`.
+5. All meal costs must respect the {hotel_pref} tier caps.
 
 ## Output Format
 
@@ -2050,8 +2209,23 @@ suggested_time is required on every meal slot."""
     "day": {start_day},
     "theme": "Short day theme",
     "day_summary": "One-line summary of the day's flow",
-    "places_to_visit": [
+    "timeline": [
       {{
+        "type": "meal",
+        "slot": "breakfast",
+        "name": "Restaurant Name",
+        "cuisine": "Cuisine Type",
+        "approx_cost": "₹150–₹250",
+        "rating": "4.1",
+        "location": "Area Name",
+        "near_place": "First place of the day",
+        "reason": "Quick breakfast before heading out",
+        "suggested_time": "8:00 AM",
+        "duration": "30–45 mins",
+        "travel_from_prev": null
+      }},
+      {{
+        "type": "place",
         "name": "Place Name",
         "location": "City, State",
         "reason": "why it fits",
@@ -2059,41 +2233,51 @@ suggested_time is required on every meal slot."""
         "rating": "4.3",
         "opening_hours": "9:00 AM – 6:00 PM",
         "duration": "1.5–2 hours",
-        "suggested_start_time": "9:30 AM",
-        "travel_from_prev": null
-      }}
-    ],
-    "meals": {{
-      "breakfast": {{
+        "suggested_time": "9:00 AM",
+        "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}
+      }},
+      {{
+        "type": "meal",
+        "slot": "lunch",
         "name": "Restaurant Name",
         "cuisine": "Cuisine Type",
-        "approx_cost": "₹200–₹400",
+        "approx_cost": "₹400–₹600",
         "rating": "4.2",
         "location": "Area Name",
-        "near_place": "Closest place that day",
-        "reason": "Light breakfast before heading out",
-        "suggested_time": "8:00 AM"
+        "near_place": "Closest place at midday",
+        "reason": "Good spot near your midday stop",
+        "suggested_time": "1:00 PM",
+        "duration": "45–60 mins",
+        "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}
       }},
-      "lunch": {{
+      {{
+        "type": "meal",
+        "slot": "dinner",
         "name": "Restaurant Name",
         "cuisine": "Cuisine Type",
         "approx_cost": "₹500–₹800",
         "rating": "4.3",
         "location": "Area Name",
-        "near_place": "Closest place at midday",
-        "reason": "Good spot near your midday stop",
-        "suggested_time": "1:00 PM"
-      }},
-      "dinner": {{
-        "name": "Restaurant Name",
-        "cuisine": "Cuisine Type",
-        "approx_cost": "₹800–₹1,200",
-        "rating": "4.4",
-        "location": "Area Name",
-        "near_place": "Closest place from last activity",
+        "near_place": "Last place of the day",
         "reason": "Relaxed dinner to end the day",
-        "suggested_time": "8:00 PM"
+        "suggested_time": "8:00 PM",
+        "duration": "60–90 mins",
+        "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}
       }}
+    ],
+    "meal_options": {{
+      "breakfast": [
+        {{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹100–₹200", "rating": "4.0", "location": "Area", "reason": "Budget-friendly"}},
+        {{"name": "Alt 2", "cuisine": "Type", "approx_cost": "₹200–₹300", "rating": "4.2", "location": "Area", "reason": "Good South Indian"}}
+      ],
+      "lunch": [
+        {{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹350–₹500", "rating": "4.1", "location": "Area", "reason": "Popular local"}},
+        {{"name": "Alt 2", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.3", "location": "Area", "reason": "Great thali"}}
+      ],
+      "dinner": [
+        {{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹500–₹700", "rating": "4.2", "location": "Area", "reason": "Open late"}},
+        {{"name": "Alt 2", "cuisine": "Type", "approx_cost": "₹600–₹900", "rating": "4.4", "location": "Area", "reason": "Sea view"}}
+      ]
     }}
   }}
 ]}}
@@ -2103,44 +2287,108 @@ suggested_time is required on every meal slot."""
             {"role": "user",   "content": user_content},
         ]
 
-    def generate_travel_itinerary_prompt(self, user_preferences, top_places, top_restaurants, top_hotels):
+    def generate_travel_itinerary_prompt(self, user_preferences, top_places, top_restaurants, top_hotels, rest_slot_counts=None):
         trip_duration = user_preferences['trip_duration']
+        hotel_pref = str(user_preferences.get('hotel_preference') or 'mid').strip().lower()
+        arrival_time = user_preferences.get('arrival_time', '').strip()
+        departure_time = user_preferences.get('departure_time', '').strip()
+
+        arrival_block = ""
+        if arrival_time:
+            arrival_block = f"""
+## ARRIVAL / DEPARTURE — smart planner context
+- User arrives on Day 1 at {arrival_time}. Think like a well-travelled friend:
+  - If hotel check-in is not until later (e.g. noon), do a quick bag-drop (5 min check_in note) and head out.
+  - If arriving 6am, a sunrise spot / beach / market before check-in is perfect.
+  - If arriving 2pm, have lunch on the way, keep bags if needed, then explore before formal check-in.
+  - First timeline item on Day 1 is the hotel check_in (or bag-drop) — travel_from_prev is null.
+"""
+        if departure_time:
+            arrival_block += f"""- User departs on the LAST day at {departure_time}. Work backwards:
+  - Leave 60–90 min buffer for travel to airport/station + 20–30 min packing.
+  - Add hotel check_out before the last sightseeing block.
+  - Never over-schedule the last day — only activities that genuinely fit before departure.
+"""
+
+        tier_table = (
+            "| tier    | hotel/night      | breakfast | lunch   | dinner  |\n"
+            "|---------|-----------------|-----------|---------|----------|\n"
+            "| budget  | <₹1,500         | <₹200     | <₹350   | <₹400    |\n"
+            "| mid     | ₹1,500–₹4,500   | <₹400     | <₹700   | <₹700    |\n"
+            "| high    | ₹4,500–₹10,000  | <₹700     | <₹1,200 | <₹1,500  |\n"
+            "| luxury  | ₹10,000+        | <₹1,200   | <₹2,500 | ₹3,000+  |"
+        )
 
         system_content = f"""You are a senior human trip planner with 20 years of experience crafting real, enjoyable travel itineraries for Indian travellers. You think about trips the way a well-travelled friend would — not like a robot filling a schedule.
 
 Your entire response must be a single raw JSON object. Start with {{ and end with }}. No markdown, no code fences, no explanation, no preamble. Nothing outside the JSON.
 
-🚨 Use EXACT key names as shown in the output format. `approx_cost` is not `cost`. `placename` is not `name`. `price_range` is not `budget`. Even a small key change will break the app.
+🚨 Use EXACT key names as shown in the output format. Even a small key change will break the app.
 No trailing commas. No NaN — use "" for missing strings, null for missing numbers. No comments inside JSON.
 
 ## Planning philosophy
 
 A good trip has rhythm. Not every day should be equally packed.
 
-Day pacing guide — schedule by available time, not by a fixed place count:
-- A day runs roughly 9:00 AM to 8:00 PM (11 hours). Deducting meals (~3 hrs total) leaves ~8 hrs for places + travel.
-- ALL days — including Day 1 and the final day — are FULL days. Travelers may arrive the night before or depart late at night, so assume every day is fully available for sightseeing.
-- Full day: use the full ~8 hrs. Pack as many places as genuinely fit without rushing — could be 3, 4, or more for short/nearby attractions.
-- Relaxed day (only applicable for 5+ day trips, one middle day): ~5–6 hrs for sightseeing. Choose fewer or shorter-duration places, but still fill the available time — do NOT limit to 1 place.
+Day pacing guide:
+- A standard day runs 9:00 AM to 9:00 PM. Deducting meals (~3 hrs) leaves ~9 hrs for places + travel.
+- Full day: pack as many places as genuinely fit without rushing — could be 3, 4, or more for short/nearby.
+- Relaxed day (5+ day trips, one middle day): ~5–6 hrs of sightseeing, choose slower experiences.
 - 6+ day trips: alternate full and relaxed days. Never 3 packed days in a row.
 - Never leave large idle gaps. If time remains after the last planned place, add one more nearby attraction.
+- Travel is real: a 20-min cab + parking + walk-in = 35 min gone. Be honest about time.
 
-Travel is real. A 20-min cab ride + finding parking + walking in = 35 min gone.
+## Smart timing rules (use your destination knowledge)
 
-## Meal timing — 3 meals every day, in the `meals` dict
+- **Sunrise spots** (beaches, ghats, forts, hilltops, mountain passes, river fronts): schedule BEFORE 6:00 AM for days the traveller would wake early. Follow with breakfast at ~7:30–8:00 AM after returning.
+- **Nightlife days** (preferred_activities includes "Nightlife", OR destination is famous for clubs like Goa, Mumbai, Manali): push dinner to 8–9 PM, add club/bar/lounge after 10 PM as a `type:"place"` item, breakfast next morning at 9–10 AM (not 7 AM — they slept late). Adjust the full day's rhythm accordingly.
+- A sunrise day starts at 5 AM; a party day ends at 1 AM. Meals shift to match — don't force 7 AM breakfast after a 1 AM night.
 
-Each day must have exactly 3 entries in the `meals` dict: `breakfast`, `lunch`, and `dinner`.
-- breakfast: near the hotel or on the way. Typically 7:30–8:30 AM.
-- lunch: after 2–3 hours of morning sightseeing. Typically 12:30–1:30 PM. Derive honestly from the morning flow.
-- dinner: after the last place winds down. Typically 7:30–9:00 PM. Set a realistic evening time.
+## Budget tiers — STRICTLY calibrate all meal costs and hotel selection
+{tier_table}
+User's tier: **{hotel_pref}**. Every meal's `approx_cost` and every `meal_options` alternative MUST be within the tier's caps above. Do not suggest a restaurant above the cap.
 
-`suggested_time` and `duration` are mandatory on every meal. Derive `suggested_time` from the actual day timeline — do not use a fixed template.
+## TIMELINE structure — all items in ONE flat array per day
+
+Each day's `timeline` is a flat, chronological array. Every item has `type` (place / meal / hotel).
+- `place` items: sightseeing stops
+- `meal` items: breakfast / lunch / dinner (include `slot` field)
+- `hotel` items: check_in / check_out events (include `event` field: "check_in" or "check_out")
+
+Day 1: timeline starts with hotel check_in (or bag-drop note if arrival_time given).
+Last day: timeline ends with hotel check_out before final departure activities.
+City-transition days (multi-city trips): last item = check_out old hotel, first item of next day = check_in new hotel.
+
+Every timeline item has: `type`, `name`, `suggested_time`, `duration`, `travel_from_prev`.
+- `travel_from_prev`: null for first item of the day, otherwise {{"duration_mins": int, "mode": "walking|auto|cab", "note": "human string"}}
+- Place items also: `location`, `reason`, `activities`, `rating`, `opening_hours`
+- Meal items also: `slot` ("breakfast"|"lunch"|"dinner"), `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`
+- Hotel items also: `event` ("check_in"|"check_out"), `note`
+
+## meal_options — swappable alternatives per slot (separate from timeline)
+
+Each day also has `meal_options` dict with "breakfast", "lunch", "dinner" keys. Each is an array of 2–3 alternative restaurants the user can swap to. Same fields as meal timeline items (except no `travel_from_prev`). All alternatives must also respect the budget tier cap.
 
 ## Day count (initial generation — non-negotiable)
 
 Output exactly {trip_duration} day objects in the `itinerary` array (day 1 through day {trip_duration}).
-`suggested_places` are hints — fit them within the fixed days. If one won't fit, omit it gracefully. Do NOT extend the day count.
-"""
+`suggested_places` are hints — fit them within the fixed days. Do NOT extend the day count.
+{arrival_block}"""
+
+        caps = self._MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
+        b_cap, l_cap, d_cap = caps
+        sc = rest_slot_counts or {}
+        n_b, n_l, n_d = sc.get('breakfast', 0), sc.get('lunch', 0), sc.get('dinner', 0)
+        rest_coverage = (
+            f"Dataset coverage for {hotel_pref} tier: "
+            f"breakfast-eligible: {n_b}  |  lunch-eligible: {n_l}  |  dinner-eligible: {n_d}\n"
+            f"- Prefer restaurants with Votes > 100 (more reviews = more reliable rating).\n"
+            f"- Use the `suitable_slots` column to assign each restaurant to the correct meal slot.\n"
+            f"- Cost column is 'cost for two' in INR — a Cost of 400 means ₹200 per person.\n"
+            f"- If a slot has fewer than 3 dataset options, supplement with your own knowledge "
+            f"but still keep costs within ₹{b_cap}/₹{l_cap}/₹{d_cap} per person "
+            f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
+        )
 
         user_content = f"""Generate a {trip_duration}-day travel itinerary using the preferences and datasets below.
 
@@ -2156,151 +2404,133 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
 - Start date: {user_preferences.get('start_date', 'not specified')}
 - Suggested places: {user_preferences['suggested_places']}
 - Budget: {user_preferences['budget']}
+- Hotel preference tier: {hotel_pref}
 
 ### 📍 Recommended Places (Use only these when available!)
 {top_places}
 
-### 🍽️ Restaurants Dataset (Use only real data when available)
+### 🍽️ Restaurants Dataset
 {top_restaurants}
+
+{rest_coverage}
 
 ### 🏨 Hotels Dataset (Use only real data when available)
 {top_hotels}
 
 ### 🧠 Rules
 
-1. The final output must be 100% valid JSON. Strictly no broken or partial JSON.
-2. 🚨 DAY COUNT IS MANDATORY: The `itinerary` array must contain exactly {trip_duration} day objects (day 1 through day {trip_duration}). Never stop early. This is non-negotiable.
-3. You must include all {user_preferences['suggested_places']} in the itinerary. If including them requires more than {trip_duration} days, still produce exactly {trip_duration} days (initial generation has fixed days).
-4. To fill all {trip_duration} days, use every relevant place from the Recommended Places dataset first, then your own travel knowledge to add more real, distinct nearby attractions so every day's available time is filled. Add an extra place whenever the day's schedule has remaining time before dinner. Do not repeat places across days.
-4b. If the destination genuinely cannot fill {trip_duration} days even after adding day-trips: still output all {trip_duration} days, but set `notes` to a short advisory suggesting the recommended number of days. If {trip_duration} days fits well, set `notes` to "".
-5. Each day must include: as many geographically close places as fit within the day's available time (see pacing guide) — minimum 2, no fixed upper limit. Always include exactly 3 meal slots (breakfast/lunch/dinner in the `meals` dict). Hotels go at the TOP LEVEL, not inside days.
-6. For each place include: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_start_time`, `travel_from_prev`.
-   - `opening_hours`: typical operating hours (e.g. "9:00 AM – 6:00 PM"). Use your knowledge; if unknown, "Check locally".
-   - `rating`: from dataset when available; otherwise a realistic value.
-   - `suggested_start_time`: derived from previous place start + duration + travel time. Be honest about travel time.
-   - `travel_from_prev`: null for first place of the day. For others: {{"duration_mins": int, "mode": "walking|auto|cab", "note": "human string"}}. Walking < 1.5 km, auto 1.5–4 km, cab > 4 km.
-   - Do not suggest a place on a day it is regularly closed (use start_date to calculate day-of-week).
-7. For each meal include: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`.
-   - `suggested_time` is mandatory — derive from the day's actual time flow (see system instructions).
-   - `duration`: typical time spent (e.g. "30–45 mins" for breakfast, "45–60 mins" for lunch/dinner).
-   - `near_place`: the closest place being visited that day.
-   - Choose restaurants matching food preferences and budget.
-8. Top-level `hotels`: exactly 3 options (budget / mid / luxury) for the whole trip. Include: `name`, `type`, `price_range`, `rating`, `location`, `reason`, `from_day`, `to_day`, `link`.
-   - Use the `hotel_star_rating` column to assign tiers: 0–2 star = budget, 3 star = mid, 4–5 star = luxury.
-   - Pick one hotel per tier strictly from the Hotels Dataset above. Only use your own knowledge for a tier if the dataset has zero candidates for it.
-   - User hotel preference: "{user_preferences.get('hotel_preference') or 'all'}". If not "all", emphasise that tier — make it the strongest recommendation and pick a great match from the dataset for it.
-   - `link`: use `pageurl` from the dataset when available; only generate a URL if the field is empty.
-   - Estimate `price_range` from the star tier: budget ≈ ₹1,000–₹3,000/night, mid ≈ ₹3,000–₹8,000/night, luxury ≈ ₹8,000+/night.
-9. On Day 1 and the final day, choose places/hotels closer to airport/train station.
-10. Avoid repeating places, hotels, or restaurants on different days.
-11. Keep travel flow linear — no A→B→A routing.
-12. The trip starts on "{user_preferences.get('start_date', '')}". Use this to determine day-of-week for each day.
-13. Order `places_to_visit` within each day by opening time — earliest-closing places first; sunset/night spots last.
-14. Do NOT include comments, markdown, or explanation — only JSON output.
-15. Do NOT add trailing commas.
-16. If required fields are missing in datasets, generate realistic replacements using your travel knowledge.
-17. Always generate a full response — no placeholder text like "TBD" or "N/A".
-18. At the end of the JSON, include a `similar_places` list — 2–3 alternative Indian destinations matching user's vibe, activities, and trip type.
-19. Don't add NaN if any field is not available. Leave it blank ("").
+1. Output must be 100% valid JSON.
+2. 🚨 The `itinerary` array must contain exactly {trip_duration} day objects (day 1 through {trip_duration}). Non-negotiable.
+3. Include all `suggested_places` within {trip_duration} days.
+4. Fill all days using the Recommended Places dataset first, then your own knowledge for nearby attractions.
+4b. If destination cannot genuinely fill {trip_duration} days, output all days anyway and set `notes` with a friendly advisory.
+5. Each day: as many geographically close places as fit (minimum 2), 3 meal slots, hotel check_in/check_out where appropriate. All in the `timeline` array — NO separate `places_to_visit` or `meals` dict.
+6. Place items in timeline: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`. Do not suggest a place on a day it is regularly closed (use start_date for day-of-week).
+7. Meal items in timeline: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `slot`. Costs MUST be within tier cap for {hotel_pref}.
+8. Hotels: grouped by city. If single-city trip → one group. If multi-city → one group per city with correct from_day/to_day. Each group has `selected` (best match for "{hotel_pref}" tier) and `alternatives` (1–2 other options from other tiers). Pick from Hotels Dataset; use your knowledge only if a tier has no dataset candidate. Include `name`, `type`, `price_range`, `rating`, `location`, `reason`, `link`.
+9. `meal_options` per day: 2–3 swappable alternatives per slot (breakfast/lunch/dinner). Must respect tier cap.
+10. Keep travel flow linear — no A→B→A routing. Order places by opening time; sunset/night spots last.
+11. The trip starts on "{user_preferences.get('start_date', '')}". Use this for day-of-week calculations.
+12. No placeholder text ("TBD", "N/A"). No comments, markdown, or explanation — only JSON.
+13. Include `similar_places` (2–3 alternative destinations).
 
-### 📦 Output Format (JSON)
-
-The example below shows a single day. Repeat for every day from 1 to {trip_duration}.
-Hotels go at the TOP LEVEL (not inside days) — 3 options covering budget/mid/luxury for the whole trip.
+### 📦 Output Format (JSON — single day shown, repeat for all {trip_duration} days)
 
 {{
   "itinerary": [
     {{
       "day": 1,
       "theme": "Short day theme",
-      "day_summary": "One-line summary e.g. Morning temples → afternoon bazaar → riverside dinner",
-      "places_to_visit": [
+      "day_summary": "One-line summary e.g. Sunrise beach → temple → lunch → fort → dinner by the sea",
+      "timeline": [
         {{
+          "type": "hotel",
+          "event": "check_in",
+          "name": "Hotel Name",
+          "suggested_time": "11:00 AM",
+          "duration": "15 mins",
+          "travel_from_prev": null,
+          "note": "Check in and freshen up"
+        }},
+        {{
+          "type": "place",
           "name": "Place Name",
           "location": "City, State",
-          "reason": "Matches your interest in [e.g. temples, nature]",
+          "reason": "Why it fits the trip",
           "activities": ["Activity 1", "Activity 2"],
-          "rating": "X.X",
+          "rating": "4.3",
           "opening_hours": "9:00 AM – 6:00 PM",
           "duration": "1.5–2 hours",
-          "suggested_start_time": "9:30 AM",
-          "travel_from_prev": null
+          "suggested_time": "11:30 AM",
+          "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab from hotel"}}
+        }},
+        {{
+          "type": "meal",
+          "slot": "lunch",
+          "name": "Restaurant Name",
+          "cuisine": "Cuisine Type",
+          "approx_cost": "₹400–₹600",
+          "rating": "4.2",
+          "location": "Area Name",
+          "near_place": "Closest place that day",
+          "reason": "Great local spot near your midday stop",
+          "suggested_time": "1:30 PM",
+          "duration": "45–60 mins",
+          "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}
+        }},
+        {{
+          "type": "meal",
+          "slot": "dinner",
+          "name": "Restaurant Name",
+          "cuisine": "Cuisine Type",
+          "approx_cost": "₹600–₹900",
+          "rating": "4.4",
+          "location": "Area Name",
+          "near_place": "Last place of the day",
+          "reason": "Relaxed dinner to end the day",
+          "suggested_time": "8:00 PM",
+          "duration": "60–90 mins",
+          "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}
         }}
       ],
-      "meals": {{
-        "breakfast": {{
-          "name": "Restaurant Name",
-          "cuisine": "Cuisine Type",
-          "approx_cost": "₹200–₹400",
-          "rating": "X.X",
-          "location": "Area Name",
-          "near_place": "Closest place to visit that day",
-          "reason": "Matches your food preference: {user_preferences['food_preferences']}",
-          "suggested_time": "8:00 AM",
-          "duration": "30–45 mins"
-        }},
-        "lunch": {{
-          "name": "Restaurant Name",
-          "cuisine": "Cuisine Type",
-          "approx_cost": "₹500–₹800",
-          "rating": "X.X",
-          "location": "Area Name",
-          "near_place": "Closest place at midday",
-          "reason": "Good spot for lunch near your midday stop",
-          "suggested_time": "1:00 PM",
-          "duration": "45–60 mins"
-        }},
-        "dinner": {{
-          "name": "Restaurant Name",
-          "cuisine": "Cuisine Type",
-          "approx_cost": "₹800–₹1,200",
-          "rating": "X.X",
-          "location": "Area Name",
-          "near_place": "Closest place from last activity",
-          "reason": "Relaxed dinner after the day's sightseeing",
-          "suggested_time": "8:00 PM",
-          "duration": "60–90 mins"
-        }}
+      "meal_options": {{
+        "breakfast": [
+          {{"name": "Alt Restaurant 1", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.1", "location": "Area", "reason": "Quick and nearby"}},
+          {{"name": "Alt Restaurant 2", "cuisine": "Type", "approx_cost": "₹200–₹300", "rating": "4.0", "location": "Area", "reason": "Good veg options"}}
+        ],
+        "lunch": [
+          {{"name": "Alt Restaurant 1", "cuisine": "Type", "approx_cost": "₹350–₹500", "rating": "4.3", "location": "Area", "reason": "Popular local choice"}},
+          {{"name": "Alt Restaurant 2", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "reason": "Good seafood"}}
+        ],
+        "dinner": [
+          {{"name": "Alt Restaurant 1", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.4", "location": "Area", "reason": "Rooftop view"}},
+          {{"name": "Alt Restaurant 2", "cuisine": "Type", "approx_cost": "₹600–₹900", "rating": "4.3", "location": "Area", "reason": "Live music"}}
+        ]
       }}
     }}
   ],
   "hotels": [
     {{
-      "name": "Hotel Name",
-      "type": "budget",
-      "price_range": "₹1,000–₹3,000/night",
-      "rating": "X.X",
-      "location": "City, State",
-      "reason": "Near visited places or transport hub. Good for {user_preferences['travel_group_type']}",
+      "city": "City Name",
       "from_day": 1,
       "to_day": {trip_duration},
-      "link": "Add valid Page URL from hotel dataset or generated link"
-    }},
-    {{
-      "name": "Hotel Name",
-      "type": "mid",
-      "price_range": "₹3,000–₹8,000/night",
-      "rating": "X.X",
-      "location": "City, State",
-      "reason": "Good value, near key attractions",
-      "from_day": 1,
-      "to_day": {trip_duration},
-      "link": "Add valid Page URL from hotel dataset or generated link"
-    }},
-    {{
-      "name": "Hotel Name",
-      "type": "luxury",
-      "price_range": "₹8,000+/night",
-      "rating": "X.X",
-      "location": "City, State",
-      "reason": "Premium experience for {user_preferences['travel_group_type']}",
-      "from_day": 1,
-      "to_day": {trip_duration},
-      "link": "Add valid Page URL from hotel dataset or generated link"
+      "selected": {{
+        "name": "Best Hotel for Tier",
+        "type": "{hotel_pref}",
+        "price_range": "₹X–₹Y/night",
+        "rating": "4.3",
+        "location": "City, State",
+        "reason": "Best match for your {hotel_pref} tier preference",
+        "link": "https://..."
+      }},
+      "alternatives": [
+        {{"name": "Budget Option", "type": "budget", "price_range": "₹800–₹1,500/night", "rating": "4.0", "location": "City, State", "reason": "Affordable, central", "link": "https://..."}},
+        {{"name": "Luxury Option", "type": "luxury", "price_range": "₹12,000+/night", "rating": "4.8", "location": "City, State", "reason": "Premium experience", "link": "https://..."}}
+      ]
     }}
   ],
-  "name": "Place Name",
-  "description": "Short description of the place",
+  "name": "Destination Name",
+  "description": "Short description of the destination",
   "total_days": {trip_duration},
   "notes": "",
   "price_estimated_range": "give the total price range estimated per head. It should be in the range of {user_preferences['budget']} if the price range actually comes in the user's budget, otherwise show the actual price range.",
@@ -2311,13 +2541,7 @@ Hotels go at the TOP LEVEL (not inside days) — 3 options covering budget/mid/l
       "placename": "Alternative Destination 1",
       "description": "Why this is a good fit based on user's preferences",
       "state": "State Name",
-      "price_estimated_range": "same logic as above"
-    }},
-    {{
-      "placename": "Alternative Destination 2",
-      "description": "Why this is a good fit based on user's preferences",
-      "state": "State Name",
-      "price_estimated_range": "same logic as above"
+      "price_estimated_range": "₹X,XXX–₹X,XXX per person"
     }}
   ]
 }}
@@ -2333,60 +2557,72 @@ Hotels go at the TOP LEVEL (not inside days) — 3 options covering budget/mid/l
 
         return textwrap.dedent(prompt)
 
-    def generate_edit_itinerary_prompt(self, user_preferences, top_places, top_restaurants, top_hotels, must_include_places):
+    def generate_edit_itinerary_prompt(self, user_preferences, top_places, top_restaurants, top_hotels, must_include_places, rest_slot_counts=None):
         must_include_block = "\n".join(f"  - {name}" for name in must_include_places) or "  (none specified)"
         trip_duration = user_preferences['trip_duration']
+        hotel_pref = str(user_preferences.get('hotel_preference') or 'mid').strip().lower()
+        arrival_time = user_preferences.get('arrival_time', '').strip()
+        departure_time = user_preferences.get('departure_time', '').strip()
+
+        arrival_block = ""
+        if arrival_time:
+            arrival_block += f"- User arrives on Day 1 at {arrival_time}. Reason like a smart planner: bag-drop before check-in, sunrise spot if arriving early, lunch on the way if arriving at 2pm.\n"
+        if departure_time:
+            arrival_block += f"- User departs on the last day at {departure_time}. Work backwards: 60–90 min buffer for transport + 20–30 min packing. Include hotel check_out item. Don't over-schedule.\n"
+
+        tier_table = (
+            "| tier   | breakfast | lunch   | dinner  |\n"
+            "|--------|-----------|---------|----------|\n"
+            "| budget | <₹200     | <₹350   | <₹400    |\n"
+            "| mid    | <₹400     | <₹700   | <₹700    |\n"
+            "| high   | <₹700     | <₹1,200 | <₹1,500  |\n"
+            "| luxury | <₹1,200   | <₹2,500 | ₹3,000+  |"
+        )
 
         system_content = f"""You are a senior human trip planner with 20 years of experience crafting real, enjoyable travel itineraries for Indian travellers.
 
-This is an EDIT request. The user has explicitly chosen specific places they want in their itinerary. Your primary job is to honour every place on the must-include list — even if it means adding extra days. Think like a human planner who listens to what the traveller actually wants.
+This is an EDIT request. The user has explicitly chosen specific places. Your primary job is to honour every must-include place — even if it means adding extra days.
 
-Your entire response must be a single raw JSON object. Start with {{ and end with }}. No markdown, no code fences, no explanation, no preamble. Nothing outside the JSON.
+Your entire response must be a single raw JSON object. Start with {{ and end with }}. No markdown, no code fences, no explanation. Use EXACT key names shown. No trailing commas. No NaN. No comments inside JSON.
 
-Use EXACT key names as shown in the output format. No trailing commas. No NaN — use "" for missing strings, null for missing numbers. No comments inside JSON.
+## TIMELINE structure — all items in ONE flat array per day
+Each day's `timeline` is chronological. Every item has `type` (place / meal / hotel).
+- `place`: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`
+- `meal`: `slot` ("breakfast"|"lunch"|"dinner"), `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `travel_from_prev`
+- `hotel`: `event` ("check_in"|"check_out"), `name`, `suggested_time`, `duration`, `travel_from_prev`, `note`
 
-## Planning philosophy
+`travel_from_prev` = null for first item, else {{"duration_mins": int, "mode": "walking|auto|cab", "note": "string"}}.
 
-A good trip has rhythm. Not every day should be equally packed. Think like a human planner who knows when to pause.
+## meal_options — swappable alternatives per slot
+Each day has `meal_options` with "breakfast", "lunch", "dinner" arrays (2–3 alternatives, no `travel_from_prev`).
 
-Day pacing guide:
-- 1–2 day trip: reasonably full days, not exhausting.
-- 3 day trip: Day 1 = lighter arrival/orientation, Day 2 = full exploration, Day 3 = relaxed morning + departure-friendly afternoon.
-- 4 day trip: Day 1 = light arrival, Day 2 = full, Day 3 = relaxed/leisure (1–2 places, long lunch, slow afternoon), Day 4 = easy departure morning.
-- 5 day trip: Day 1 = light, Day 2 = full, Day 3 = full, Day 4 = relaxed leisure, Day 5 = easy departure day.
-- 6+ day trips: alternate full and relaxed days. Never 3 packed days in a row.
-- A "relaxed day" means 1–2 places max, one being a slow/nature/market/beach experience, a long unhurried lunch, maybe an evening stroll.
+## Budget tier: {hotel_pref}
+{tier_table}
+All `approx_cost` values must stay within the "{hotel_pref}" tier caps.
 
-Travel is real. A 20-min cab ride + finding parking + walking in = 35 min gone. Be honest about time.
-
-## Meal timing rules
-
-Meals are part of the experience, not logistics.
-
-Breakfast (30–45 min):
-- Near the hotel or on the way to the first place. Typically 7:30–8:30 AM.
-- Set `suggested_time` to a realistic time e.g. "8:00 AM".
-
-Lunch (60–75 min):
-- After 2–3 hours of morning sightseeing. Typically 12:30 PM – 1:30 PM.
-- Derive the time honestly from the morning's actual schedule.
-- Set `suggested_time` accordingly.
-
-Dinner (90 min):
-- After the last place of the day winds down. Typically 7:30 PM – 9:00 PM.
-- Set `suggested_time` to a realistic evening time.
-- Nothing planned after dinner.
-
-`suggested_time` is required on every meal. Derive from the actual day timeline.
-
+## Smart timing
+- Sunrise spots: before 6 AM; breakfast follows at ~7:30–8 AM.
+- Nightlife: dinner at 8–9 PM, late-night venue after 10 PM, breakfast next day 9–10 AM.
+{arrival_block}
 ## Day count (edit — flexible)
+First try to fit all must-include places within {trip_duration} days. If they don't fit, extend by the minimum extra days needed and update `total_days` with a friendly `notes` message."""
 
-First, try to fit all must-include places within {trip_duration} days.
-If they do not all fit: extend the trip by the minimum number of extra days needed to include every must-include place. Update `total_days` to the new count and add a friendly `notes` message explaining the extension.
-If they fit within {trip_duration} days: set `total_days` to {trip_duration} and `notes` to "".
-"""
+        caps = self._MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
+        b_cap, l_cap, d_cap = caps
+        sc = rest_slot_counts or {}
+        n_b, n_l, n_d = sc.get('breakfast', 0), sc.get('lunch', 0), sc.get('dinner', 0)
+        rest_coverage = (
+            f"Dataset coverage for {hotel_pref} tier: "
+            f"breakfast-eligible: {n_b}  |  lunch-eligible: {n_l}  |  dinner-eligible: {n_d}\n"
+            f"- Prefer restaurants with Votes > 100 (more reviews = more reliable rating).\n"
+            f"- Use the `suitable_slots` column to assign each restaurant to the correct meal slot.\n"
+            f"- Cost column is 'cost for two' in INR — a Cost of 400 means ₹200 per person.\n"
+            f"- If a slot has fewer than 3 dataset options, supplement with your own knowledge "
+            f"but still keep costs within ₹{b_cap}/₹{l_cap}/₹{d_cap} per person "
+            f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
+        )
 
-        user_content = f"""Rebuild this travel itinerary. The places listed under "Must Include" are a hard requirement — every single one must appear in the final plan.
+        user_content = f"""Rebuild this travel itinerary. Every must-include place MUST appear in the final plan.
 
 ## User Preferences
 - Places of interest: {user_preferences['places_of_interest']}
@@ -2396,155 +2632,79 @@ If they fit within {trip_duration} days: set `total_days` to {trip_duration} and
 - Starting location: {user_preferences['user_location']}
 - Travel month: {user_preferences['current_month']}
 - Trip type: {user_preferences['trip_type']}
-- Trip duration: {trip_duration} days (may be extended if must-include places require it)
+- Trip duration: {trip_duration} days (may be extended)
 - Start date: {user_preferences.get('start_date', 'not specified')}
 - Budget: {user_preferences['budget']}
+- Hotel preference tier: {hotel_pref}
 
-## Places that MUST be included (hard requirement — do not drop, rename, or merge any)
+## Places that MUST be included (hard requirement)
 {must_include_block}
 
-## Recommended Places (supplement with your knowledge if needed)
+## Recommended Places
 {top_places}
 
-## Restaurants Dataset (use real data when available)
+## Restaurants Dataset
 {top_restaurants}
 
-## Hotels Dataset (use real data when available)
+{rest_coverage}
+
+## Hotels Dataset
 {top_hotels}
 
 ## Rules
-
-1. Every must-include place must appear in `places_to_visit` across the days. This is non-negotiable.
-2. Distribute must-include places sensibly across days, grouping geographically close ones together, linear travel flow.
-3. If they do not fit in {trip_duration} days, extend the trip (minimum extra days needed). Update `total_days` and add a friendly `notes` message about the extension.
-4. After placing must-include places, fill remaining slots with other relevant places (dataset or your knowledge) so each full day has 2–3 geographically close places.
-5. For each place include: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_start_time`, `travel_from_prev`.
-   - `suggested_start_time`: derived from previous place start + duration + travel. Be honest about travel time.
-   - `travel_from_prev`: null for first place of the day. For others: {{"duration_mins": int, "mode": "walking|auto|cab", "note": "human string"}}. Walking < 1.5 km, auto 1.5–4 km, cab > 4 km.
-   - Do not suggest a place on a day it is regularly closed (use start_date to calculate day-of-week).
-6. For each meal include: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`.
-   - `suggested_time` is mandatory. Derive from the actual day timeline.
-   - Breakfast near hotel/on way to first place. Lunch after mid-morning sightseeing. Dinner after last place.
-7. Hotels: exactly 3 options (budget / mid / luxury) at trip level, NOT inside any day. Include: `name`, `type`, `price_range`, `rating`, `location`, `reason`, `from_day`, `to_day`, `link`.
-   - Use the `hotel_star_rating` column to assign tiers: 0–2 star = budget, 3 star = mid, 4–5 star = luxury.
-   - Pick one hotel per tier strictly from the Hotels Dataset. Only use your own knowledge for a tier if the dataset has zero candidates for it.
-   - User hotel preference: "{user_preferences.get('hotel_preference') or 'all'}". If not "all", emphasise that tier — make it the strongest recommendation and pick a great match from the dataset for it.
-   - `link`: use `pageurl` from the dataset when available; only generate a URL if the field is empty.
-   - Estimate `price_range` from the star tier: budget ≈ ₹1,000–₹3,000/night, mid ≈ ₹3,000–₹8,000/night, luxury ≈ ₹8,000+/night.
-8. Day 1 and last day: choose places and hotels close to airport/train station.
-9. No place, hotel, or restaurant repeated across days.
-10. Keep travel flow linear — no A→B→A routing.
-11. Order places within each day by opening time: earliest-closing first, sunset/night spots last.
-12. `similar_places`: 2–3 alternative destinations matching the user's vibe and trip type.
-13. `price_estimated_range`: total estimated per-person cost in ₹.
-14. No placeholder text like "TBD" or "N/A".
+1. Every must-include place must appear in `timeline` (as `type:"place"`) somewhere across the days.
+2. Group geographically close must-include places on the same day.
+3. Extend trip if must-include places don't fit; update `total_days` and set `notes`.
+4. Fill remaining slots with dataset places or your knowledge (min 2 places/day).
+5. Each day: places + meals (3 slots) + hotel events all in `timeline`. Also include `meal_options`.
+6. Hotels grouped by city: `selected` (best for "{hotel_pref}" tier) + `alternatives`. Multi-city = one group per city.
+7. Day 1 starts with hotel check_in (or bag-drop). Last day ends with hotel check_out before departure activities.
+8. No repeated places, hotels, or restaurants.
+9. Linear travel flow — no A→B→A.
+10. No placeholder text.
 
 ## Output Format
-
-Return only this JSON. No text before or after.
 
 {{
   "itinerary": [
     {{
       "day": 1,
       "theme": "Short day theme",
-      "day_summary": "One-line summary e.g. Must-see fort in the morning → old bazaar stroll → riverside dinner",
-      "places_to_visit": [
-        {{
-          "name": "Place Name",
-          "location": "City, State",
-          "reason": "Why this fits",
-          "activities": ["Activity 1"],
-          "rating": "4.5",
-          "opening_hours": "9:00 AM – 6:00 PM",
-          "duration": "1.5–2 hours",
-          "suggested_start_time": "9:30 AM",
-          "travel_from_prev": null
-        }}
+      "day_summary": "One-line summary",
+      "timeline": [
+        {{"type": "hotel", "event": "check_in", "name": "Hotel Name", "suggested_time": "11:00 AM", "duration": "15 mins", "travel_from_prev": null, "note": "Check in and freshen up"}},
+        {{"type": "place", "name": "Must-include Place", "location": "City, State", "reason": "Why it fits", "activities": ["Activity"], "rating": "4.5", "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}}},
+        {{"type": "meal", "slot": "lunch", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "near_place": "Must-include Place", "reason": "Great local spot", "suggested_time": "1:30 PM", "duration": "45–60 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min"}}}},
+        {{"type": "meal", "slot": "dinner", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60–90 mins", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}}
       ],
-      "meals": {{
-        "breakfast": {{
-          "name": "Restaurant Name",
-          "cuisine": "Cuisine Type",
-          "approx_cost": "₹200–₹400",
-          "rating": "4.2",
-          "location": "Area Name",
-          "near_place": "Closest place to visit that day",
-          "reason": "Light breakfast on the way to your first stop",
-          "suggested_time": "8:00 AM"
-        }},
-        "lunch": {{
-          "name": "Restaurant Name",
-          "cuisine": "Cuisine Type",
-          "approx_cost": "₹500–₹800",
-          "rating": "4.4",
-          "location": "Area Name",
-          "near_place": "Closest place at midday",
-          "reason": "Well-reviewed spot near your midday stop",
-          "suggested_time": "1:15 PM"
-        }},
-        "dinner": {{
-          "name": "Restaurant Name",
-          "cuisine": "Cuisine Type",
-          "approx_cost": "₹800–₹1,200",
-          "rating": "4.5",
-          "location": "Area Name",
-          "near_place": "Closest place from last activity",
-          "reason": "Relaxed dinner to end the day",
-          "suggested_time": "8:00 PM"
-        }}
+      "meal_options": {{
+        "breakfast": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.0", "location": "Area", "reason": "Quick option"}}],
+        "lunch": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹350–₹500", "rating": "4.1", "location": "Area", "reason": "Popular local"}}],
+        "dinner": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹500–₹700", "rating": "4.2", "location": "Area", "reason": "Open late"}}]
       }}
     }}
   ],
   "hotels": [
     {{
-      "name": "Budget Hotel Name",
-      "type": "budget",
-      "price_range": "₹1,000–₹3,000/night",
-      "rating": "4.0",
-      "location": "City, State",
-      "reason": "Affordable, central to all days. Good for {user_preferences['travel_group_type']}",
+      "city": "City Name",
       "from_day": 1,
       "to_day": {trip_duration},
-      "link": "https://..."
-    }},
-    {{
-      "name": "Mid-range Hotel Name",
-      "type": "mid",
-      "price_range": "₹3,000–₹8,000/night",
-      "rating": "4.3",
-      "location": "City, State",
-      "reason": "Good value, near key attractions",
-      "from_day": 1,
-      "to_day": {trip_duration},
-      "link": "https://..."
-    }},
-    {{
-      "name": "Luxury Hotel Name",
-      "type": "luxury",
-      "price_range": "₹8,000+/night",
-      "rating": "4.7",
-      "location": "City, State",
-      "reason": "Premium experience for {user_preferences['travel_group_type']}",
-      "from_day": 1,
-      "to_day": {trip_duration},
-      "link": "https://..."
+      "selected": {{"name": "Best Hotel", "type": "{hotel_pref}", "price_range": "₹X–₹Y/night", "rating": "4.3", "location": "City, State", "reason": "Best match for your tier", "link": "https://..."}},
+      "alternatives": [
+        {{"name": "Budget Option", "type": "budget", "price_range": "₹800–₹1,500/night", "rating": "4.0", "location": "City, State", "reason": "Affordable", "link": "https://..."}},
+        {{"name": "Luxury Option", "type": "luxury", "price_range": "₹12,000+/night", "rating": "4.8", "location": "City, State", "reason": "Premium", "link": "https://..."}}
+      ]
     }}
   ],
   "name": "Destination Name",
-  "description": "2–3 line description of the destination",
+  "description": "2–3 line description",
   "total_days": {trip_duration},
   "notes": "",
   "price_estimated_range": "₹X,XXX–₹X,XXX per person",
   "state": "State Name",
   "city": "City Name",
   "similar_places": [
-    {{
-      "placename": "Alternative Destination",
-      "description": "Why this fits the user's vibe and preferences",
-      "state": "State Name",
-      "price_estimated_range": "₹X,XXX–₹X,XXX per person"
-    }}
+    {{"placename": "Alternative Destination", "description": "Why it fits", "state": "State Name", "price_estimated_range": "₹X,XXX–₹X,XXX per person"}}
   ]
 }}
 """
@@ -2565,24 +2725,24 @@ Return only this JSON. No text before or after.
             placename = place['placename']
             # Check if it's a new place or missing image
             if placename not in existing_df['placename'].values or not place.get('image'):
-                try:
-                    # Generate and save image
-                    image_path = self.image_generator.generate_and_save_image(placename)
-                    
-                    # Upload image
-                    with open(image_path, 'rb') as image_file:
-                        response = requests.post(
-                            "https://travelens.in/app/upload.php",
-                            files={'file': image_file}
-                        )
-                        if response.status_code == 200:
-                            res = response.json()
-                            place['image'] = res['path']
-                        else:
-                            place['image'] = ''
-                except Exception as e:
-                    print(f"Error generating or uploading image for {placename}: {str(e)}")
-                    place['image'] = ''
+                # Image filling is handled by scripts/fill_missing_images.py (runs nightly).
+                # The block below was the inline Gemini/Wikimedia approach — kept for reference.
+                # try:
+                #     image_path = self.image_generator.generate_and_save_image(placename)
+                #     with open(image_path, 'rb') as image_file:
+                #         response = requests.post(
+                #             "https://travelens.in/app/upload.php",
+                #             files={'file': image_file}
+                #         )
+                #         if response.status_code == 200:
+                #             res = response.json()
+                #             place['image'] = res['path']
+                #         else:
+                #             place['image'] = ''
+                # except Exception as e:
+                #     print(f"Error generating or uploading image for {placename}: {str(e)}")
+                #     place['image'] = ''
+                place['image'] = ''
 
         try:
             similar_places_df = pd.DataFrame(similar_places)
@@ -2648,14 +2808,16 @@ Return only this JSON. No text before or after.
         return float(m.group()) if m else None
 
     def _save_new_places_to_db(self, cursor, itinerary):
-        """places_to_visit -> places (resolving/creating the city)."""
+        """timeline place items -> places table (resolving/creating the city)."""
         candidates = []
         for day in itinerary.get('itinerary', []):
-            for place in day.get('places_to_visit', []):
-                name = str(place.get('name', '')).strip()
+            for item in day.get('timeline', []):
+                if item.get('type') != 'place':
+                    continue
+                name = str(item.get('name', '')).strip()
                 if name:
-                    candidates.append((name, place.get('location', ''), place.get('activities'),
-                                       place.get('lat'), place.get('lon'), place.get('full_address')))
+                    candidates.append((name, item.get('location', ''), item.get('activities'),
+                                       item.get('lat'), item.get('lon'), item.get('full_address')))
         if not candidates:
             return
 
@@ -2682,12 +2844,19 @@ Return only this JSON. No text before or after.
         print(f"[save_new_places] inserted {inserted} new place(s).")
 
     def _save_new_hotels_to_db(self, cursor, itinerary):
-        """hotels -> hotels table (matched on property_name)."""
+        """hotels (grouped format) -> hotels table (matched on property_name)."""
         candidates = []
-        for hotel in itinerary.get('hotels', []):
-            name = str(hotel.get('name', '')).strip()
-            if name:
-                candidates.append(hotel)
+        for group in itinerary.get('hotels', []):
+            if not isinstance(group, dict):
+                continue
+            # New grouped format: {city, selected, alternatives}
+            for key in ('selected',):
+                h = group.get(key)
+                if isinstance(h, dict) and str(h.get('name', '')).strip():
+                    candidates.append(h)
+            for h in (group.get('alternatives') or []):
+                if isinstance(h, dict) and str(h.get('name', '')).strip():
+                    candidates.append(h)
         if not candidates:
             return
 
@@ -2718,15 +2887,15 @@ Return only this JSON. No text before or after.
         print(f"[save_new_places] inserted {inserted} new hotel(s).")
 
     def _save_new_restaurants_to_db(self, cursor, itinerary):
-        """restaurants -> restaurants table (matched on name)."""
+        """timeline meal items -> restaurants table (matched on name)."""
         candidates = []
         for day in itinerary.get('itinerary', []):
-            for r in day.get('meals', {}).values():
-                if not isinstance(r, dict):
+            for item in day.get('timeline', []):
+                if item.get('type') != 'meal':
                     continue
-                name = str(r.get('name', '')).strip()
+                name = str(item.get('name', '')).strip()
                 if name:
-                    candidates.append(r)
+                    candidates.append(item)
         if not candidates:
             return
 

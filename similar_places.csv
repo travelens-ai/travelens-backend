@@ -1,6 +1,4 @@
 placename,description,state,image,price_estimated_range
-Coorg,"Similar to Chikkamagaluru, Coorg is known for its coffee plantations, scenic beauty, and pleasant climate, ideal for couples interested in nature and relaxation.",Karnataka,Coorg.webp,₹6000 - ₹20000
-Wayanad,"Wayanad offers lush greenery, wildlife sanctuaries, and trekking opportunities, making it a great alternative for nature-loving couples.",Kerala,Wayanad.webp,₹5000 - ₹18000
 Leh-Ladakh,Similar high-altitude desert landscape with monasteries and adventure activities.,Ladakh,Leh-Ladakh.webp,₹45000-₹55000
 Kinnaur,Another beautiful valley in Himachal Pradesh with stunning views and monasteries.,Himachal Pradesh,Kinnaur.webp,₹35000-₹45000
 Tawang,Remote Himalayan town with monasteries and scenic beauty.,Arunachal Pradesh,Tawang.webp,₹35000-₹45000
@@ -104,3 +102,21 @@ Kaziranga National Park,"A UNESCO World Heritage Site famous for one-horned rhin
 Sundarbans National Park,"The largest mangrove forest in the world, ideal for spotting tigers and rare aquatic species.",West Bengal,,₹8000–₹15000 per head
 Chikmagalur,"Known for coffee plantations, lush greenery, and tranquil retreats.",Karnataka,,₹14000–₹19000 per head
 Neil Island,"Quieter than Havelock, Neil Island offers stunning coral reefs, clear waters, and a relaxing atmosphere.",Andaman and Nicobar Islands,,"₹15,000–₹30,000 per head"
+Skandagiri Hills,"Great for trekking and sunrise experiences, close to Nandi Hills",Karnataka,,"₹4,000–₹5,000 per person"
+Savandurga Hill,Challenging trek and peaceful surroundings for nature lovers,Karnataka,,"₹4,500–₹5,500 per person"
+Devarayanadurga,Lush greenery and trekking trails with scenic hilltop views,Karnataka,,"₹4,000–₹5,000 per person"
+Mullayanagiri,Perfect for trekking and adventure seekers with stunning views.,Karnataka,,"₹4,000–₹4,500 per person"
+Nandi Hills,Another excellent trekking destination close to Bangalore,Karnataka,,"₹3,500–₹4,000 per person"
+Savandurga,Popular for rock climbing and easy day treks near Bangalore.,Karnataka,,"₹2,800–₹3,500 per person"
+Kudremukha,Perfect for trekking amidst lush greenery and cool mountain weather.,Karnataka,,"₹3,000–₹3,500 per person"
+Nagarahole Tiger Reserve,"Another great destination for wildlife enthusiasts, offering tiger sightings and nature treks.",Karnataka,,"₹3,000–₹4,000 per person"
+Dubare Elephant Camp,An engaging experience where you can interact with and bathe elephants by the river.,Karnataka,,"₹3,000–₹3,500 per person"
+Mysuru,Known for its grand palace and vibrant cultural landmarks.,Karnataka,,"₹2,500–₹3,500 per person"
+Mullayanagiri Peak,A serene trekking and sunrise destination in Chikkamagaluru.,Karnataka,,"₹4,000–₹5,500 per person"
+Coorg (Kodagu),Beautiful hill station with dense forests and scenic views.,Karnataka,,"₹5,000–₹7,000 per person"
+Coorg,"Known for its lush greenery, waterfalls, and trekking routes.",Karnataka,Coorg.webp,"₹9,000–₹11,000 per person"
+Kerala Backwaters,A serene escape with houseboat stays and lush green surroundings,Kerala,,"₹15,000–₹20,000"
+Kerala (Varkala Beach),For tranquil beaches and Ayurvedic spa experiences,Kerala,,"₹15,000–₹18,000 per person"
+Andaman (Havelock Island),"White sand beaches and crystal-clear waters, perfect for couples",Andaman and Nicobar Islands,,"₹20,000–₹25,000 per person"
+Wayanad,Similar nature-centric experience with trekking spots and serene landscapes.,Kerala,,"₹10,000–₹15,000"
+Kodagu,Another escape in Karnataka offering stunning natural beauty and trekking opportunities.,Karnataka,,"₹9,000–₹13,000"
