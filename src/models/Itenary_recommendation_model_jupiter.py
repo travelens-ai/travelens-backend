@@ -2234,6 +2234,9 @@ All `approx_cost` values (in timeline and meal_options) must stay within the "{h
 1. Generate EXACTLY {num_days} day object(s) numbered {start_day} to {start_day + num_days - 1}.
 2. Never reuse a place from the already-used list or repeat within these new days.
 3. Each day: as many geographically close places as fit (min 2), 3 meal slots in timeline, meal_options dict.
+3b. **Meal ordering — strictly enforce every day:** Breakfast → 1 or more place visits → Lunch → 1 or more place visits → Dinner. Never place lunch immediately after breakfast, and never place dinner immediately after lunch — there must always be at least 1 place visit between consecutive meals. Between meals, include as many nearby places as naturally fit — no upper cap.
+3c. **Early morning:** If the destination is known for early morning experiences (sunrise spots, ghats, dawn markets), add a pre-breakfast place visit; breakfast follows at ~7:30–8:00 AM.
+3d. **Late night:** If the destination is famous for night experiences (night markets, beach walks, nightlife), add a post-dinner place visit after dinner.
 4. NO separate `places_to_visit` or `meals` dict — everything goes into `timeline`.
 5. All meal costs must respect the {hotel_pref} tier caps.
 
@@ -2460,6 +2463,9 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
 4. Fill all days using the Recommended Places dataset first, then your own knowledge for nearby attractions.
 4b. If destination cannot genuinely fill {trip_duration} days, output all days anyway and set `notes` with a friendly advisory.
 5. Each day: as many geographically close places as fit (minimum 2), 3 meal slots, hotel check_in/check_out where appropriate. All in the `timeline` array — NO separate `places_to_visit` or `meals` dict.
+5b. **Meal ordering — strictly enforce every day:** Breakfast → 1 or more place visits → Lunch → 1 or more place visits → Dinner. Never place lunch immediately after breakfast, and never place dinner immediately after lunch — there must always be at least 1 place visit between consecutive meals. Between meals, include as many nearby places as naturally fit — no upper cap.
+5c. **Early morning (before breakfast):** If the destination is known for early morning experiences (sunrise points, ghats, dawn markets, hilltop views), add a pre-breakfast place visit (e.g. 5:00–6:30 AM). Breakfast follows after returning (~7:30–8:00 AM).
+5d. **Late night (after dinner):** If the destination is famous for night experiences (night markets, beach walks, light shows, nightlife), add a post-dinner place visit after dinner (e.g. 9:30–10:30 PM or later for nightlife).
 6. Place items in timeline: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`. Do not suggest a place on a day it is regularly closed (use start_date for day-of-week).
 7. Meal items in timeline: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `slot`. Costs MUST be within tier cap for {hotel_pref}.
 8. Hotels: grouped by city. If single-city trip → one group. If multi-city → one group per city with correct from_day/to_day. Each group has `selected` (best match for "{hotel_pref}" tier) and `alternatives` (1–2 other options from other tiers). Pick from Hotels Dataset; use your knowledge only if a tier has no dataset candidate. Include `name`, `type`, `price_range`, `rating`, `location`, `reason`, `link`.
