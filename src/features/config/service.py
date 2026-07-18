@@ -217,6 +217,7 @@ def get_config():
     config["budgetType"] = [
         {
             "name": "Budget",
+            "value": "budget",
             "hotel": "Under ₹2000",
             "breakfast": "Under ₹100",
             "meals": "Under ₹200",
@@ -224,6 +225,7 @@ def get_config():
         },
         {
             "name": "Mid Range",
+            "value": "mid",
             "hotel": "₹1500 - ₹3000",
             "breakfast": "₹100 - ₹200",
             "meals": "₹200 - ₹300",
@@ -231,6 +233,7 @@ def get_config():
         },
         {
             "name": "High Range",
+            "value": "high",
             "hotel": "₹3000 - ₹7000",
             "breakfast": "₹200 - ₹400",
             "meals": "₹300 - ₹600",
@@ -238,6 +241,7 @@ def get_config():
         },
         {
             "name": "Luxury",
+            "value": "luxury",
             "hotel": "Above ₹7000",
             "breakfast": "Above ₹400",
             "meals": "Above ₹600",
