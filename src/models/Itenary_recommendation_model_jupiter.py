@@ -715,7 +715,7 @@ class ItenaryRecommendationSystem:
                 # a transient LLM hiccup on day 1 leaves the client with only
                 # info/hotels/images. Retry, then skip the day if still empty.
                 extra = None
-                for attempt in range(2):
+                for attempt in range(3):
                     try:
                         extra = self._generate_extra_days(
                             user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
@@ -732,6 +732,10 @@ class ItenaryRecommendationSystem:
                     print(f"[stream] day {day_no} failed after retries; skipping this day.")
                     continue
                 day = extra[0]
+                # Number the emitted day contiguously (len+1), NOT by the loop
+                # index — so a failed/skipped day never leaves a visible gap
+                # (e.g. client jumping to "Day 2" when day 1 failed).
+                day_no = len(built_days) + 1
                 day['day'] = day_no
                 # Finalize just this day (images, lat/lon, travel times, weather).
                 finalized = self._finalize_days(
@@ -2094,19 +2098,39 @@ The user's preferred tier is "{hotel_pref}". Make `selected` the best match for 
         return parsed
 
     @staticmethod
+    def _days_from_obj(obj):
+        """Extract a list of day dicts from a parsed JSON object, accepting every
+        shape the model realistically returns for a follow-up day call:
+          - {"itinerary": [ {day...} ]}
+          - {"days": [ {day...} ]}
+          - a single day object {"day": N, "timeline": [...]}  (num_days=1 case)
+        Returns a list, or None if it's not day-shaped."""
+        if not isinstance(obj, dict):
+            return None
+        for key in ("itinerary", "days"):
+            if isinstance(obj.get(key), list):
+                return obj[key]
+        # A lone day object — has a timeline (or legacy places_to_visit).
+        if "timeline" in obj or "places_to_visit" in obj or "day" in obj:
+            return [obj]
+        return None
+
+    @staticmethod
     def _parse_days_json(response_text):
-        """Parse a follow-up response that returns extra days. Accepts either a
-        bare JSON array of day objects or an object with an `itinerary` array.
-        Reuses the same tolerant extraction as the main parser."""
-        # Try object-with-itinerary first (matches the main format).
+        """Parse a follow-up response that returns extra days. Tolerant of the
+        several shapes the model returns: an object with `itinerary`/`days`, a
+        bare array of day objects, or a single day object. Reuses the same
+        balanced-object extraction as the main parser."""
+        # Scan every balanced {...} object; take the first that yields days.
         for raw in ItenaryRecommendationSystem._find_json_objects(response_text):
             try:
                 obj = json.loads(ItenaryRecommendationSystem._sanitize_llm_json(raw.strip()), strict=False)
             except ValueError:
                 continue
-            if isinstance(obj, dict) and isinstance(obj.get('itinerary'), list):
-                return obj['itinerary']
-        # Fall back to a top-level array.
+            days = ItenaryRecommendationSystem._days_from_obj(obj)
+            if days:
+                return days
+        # Fall back to parsing the whole cleaned string.
         cleaned = ItenaryRecommendationSystem._sanitize_llm_json(response_text.strip())
         if cleaned.startswith("```json"):
             cleaned = cleaned[7:]
@@ -2118,8 +2142,9 @@ The user's preferred tier is "{hotel_pref}". Make `selected` the best match for 
         parsed = json.loads(cleaned, strict=False)
         if isinstance(parsed, list):
             return parsed
-        if isinstance(parsed, dict) and isinstance(parsed.get('itinerary'), list):
-            return parsed['itinerary']
+        days = ItenaryRecommendationSystem._days_from_obj(parsed)
+        if days:
+            return days
         raise ValueError("Follow-up response did not contain a days array.")
 
     def generate_extra_days_prompt(self, user_preferences, top_places, top_restaurants, top_hotels,
