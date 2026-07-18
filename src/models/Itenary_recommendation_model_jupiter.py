@@ -963,9 +963,12 @@ class ItenaryRecommendationSystem:
         threading.Thread(target=self.save_similar_places, args=(similar,), daemon=True).start()
         for place in similar:
             sp_name = place.get('placename')
-            matching_place = similar_places_data.get(sp_name)
-            if matching_place and pd.notna(matching_place.get('image')):
-                place['image'] = matching_place['image']
+            matching_place = similar_places_data.get(sp_name) if sp_name else None
+            img = matching_place.get('image') if matching_place else None
+            # Use the mapped image only when it's a real, non-empty value;
+            # otherwise fall back to a default so `image` is never blank.
+            if img and pd.notna(img) and str(img).strip():
+                place['image'] = img
             else:
                 place['image'] = 'default' + str(random.randint(1, 7)) + '.webp'
 
