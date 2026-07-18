@@ -744,6 +744,7 @@ class ItenaryRecommendationSystem:
 
                 # Stream this day's granular events.
                 yield {'event': 'day_info', 'day': day_no,
+                       'date': day.get('date', ''), 'weekday': day.get('weekday', ''),
                        'theme': day.get('theme', ''), 'day_summary': day.get('day_summary', '')}
                 timeline = day.get('timeline', []) or []
                 has_places = any(i.get('type') == 'place' for i in timeline)
@@ -1034,6 +1035,12 @@ class ItenaryRecommendationSystem:
                 base = datetime.strptime(start_date, "%Y-%m-%d").date()
                 subset_start = (base + timedelta(days=start_day_index)).strftime("%Y-%m-%d")
                 self._attach_weather(ctx, subset_start)
+                # Attach the actual calendar date + weekday to each day, derived
+                # from the request's start_date (Day 1 = start_date).
+                for idx, day in enumerate(days):
+                    day_date = base + timedelta(days=start_day_index + idx)
+                    day['date'] = day_date.strftime("%Y-%m-%d")
+                    day['weekday'] = day_date.strftime("%A")
             except ValueError:
                 pass
 

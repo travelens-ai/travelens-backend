@@ -164,6 +164,8 @@ def _decompose_response_events(response, itinerary_id, skip_events=None):
         yield {
             "event": "day_info",
             "day": day_no,
+            "date": day.get("date", ""),
+            "weekday": day.get("weekday", ""),
             "theme": day.get("theme", ""),
             "day_summary": day.get("day_summary", ""),
         }
