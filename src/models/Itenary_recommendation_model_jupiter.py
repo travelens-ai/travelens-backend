@@ -2548,9 +2548,6 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
       "day": 1,
       "theme": "Short day theme",
       "day_summary": "One-line summary e.g. Sunrise beach → temple → lunch → fort → dinner by the sea",
-      "_day1_timeline_note": "Shape varies by arrival time — pick the matching pattern below:",
-      "_pattern_midday_afternoon": "check_in(~11AM) → place → lunch → place → dinner  [arrival 10AM–6PM, no breakfast]",
-      "_pattern_early_morning": "check_in_bag_drop(early) → breakfast(~8AM) → place → lunch → place → dinner  [arrival before 10AM, breakfast required]",
       "timeline": [
         {{"type": "hotel", "event": "check_in", "name": "Hotel Name", "suggested_time": "11:00 AM", "duration": "15 mins", "travel_from_prev": null, "note": "Check in and freshen up"}},
         {{"type": "place", "name": "Place Name", "location": "City, State", "reason": "Why it fits", "activities": ["Activity 1"], "rating": "4.3", "opening_hours": "9:00 AM – 6:00 PM", "duration": "1.5–2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab from hotel"}}}},
