@@ -8,6 +8,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+try:
+    from langfuse import get_client as _lf_get_client
+    _LF_AVAILABLE = True
+except ImportError:
+    _LF_AVAILABLE = False
+    def _lf_get_client():
+        return None
+
 # Create output folder if it doesn't exist
 output_dir = "generated_images"
 os.makedirs(output_dir, exist_ok=True)
@@ -47,7 +55,16 @@ class ImageGenerator:
     def generate_and_save_image(self, place: str) -> str:
         if not self.genai_client:
             return ""
+        lf = _lf_get_client()
+        span_ctx = lf.start_as_current_observation(
+            name="imagen_generate",
+            as_type="span",
+            input={"place": place},
+            metadata={"model": "imagen-3.0-generate-002"},
+        ) if lf else None
         try:
+            if span_ctx:
+                span_ctx.__enter__()
             response = self.genai_client.models.generate_images(
                 model='imagen-3.0-generate-002',
                 prompt=f"Generate an image of a place {place} to display on a travel itinerary",
@@ -60,6 +77,9 @@ class ImageGenerator:
 
             if not response.generated_images:
                 print("No image generated.")
+                if span_ctx:
+                    lf.update_current_span(output={"result": "no_image_generated"})
+                    span_ctx.__exit__(None, None, None)
                 return ""
 
             img_bytes = response.generated_images[0].image.image_bytes
@@ -77,7 +97,13 @@ class ImageGenerator:
                 f.write(buffer.getvalue())
 
             print(f"Image saved to {filepath} ({size_kb:.2f} KB)")
+            if span_ctx:
+                lf.update_current_span(output={"saved_path": filepath, "size_kb": round(size_kb, 2)})
+                span_ctx.__exit__(None, None, None)
             return filepath
         except Exception as e:
             print(f"Error processing image for {place}: {e}")
+            if span_ctx:
+                lf.update_current_span(output={"error": str(e)})
+                span_ctx.__exit__(None, None, None)
             return ""

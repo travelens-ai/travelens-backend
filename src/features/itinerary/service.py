@@ -3,7 +3,10 @@ import json
 import time
 import threading
 
-from openai import AzureOpenAI
+try:
+    from langfuse.openai import AzureOpenAI  # auto-traces embeddings.create
+except ImportError:
+    from openai import AzureOpenAI
 
 from core.config import (
     AZURE_OPENAI_API_KEY,

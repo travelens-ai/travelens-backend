@@ -47,8 +47,10 @@ def generate_itinerary():
     if not itinerary_service.is_initialized():
         return itinerary_service.loading_response()
     try:
-        user_preferences = request.json
-        cache_key = json.dumps(user_preferences, sort_keys=True)
+        user_preferences = dict(request.json or {})
+        user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
+        user_preferences['_session_id'] = getattr(request, 'device_id', None)
+        cache_key = json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
         cached_result, cached_id = itinerary_service.get_cached_itinerary(cache_key)
         if cached_result is not None:
@@ -230,8 +232,10 @@ def generate_itinerary_stream():
     if not itinerary_service.is_initialized():
         return itinerary_service.loading_response()
 
-    user_preferences = request.json
-    cache_key = json.dumps(user_preferences, sort_keys=True)
+    user_preferences = dict(request.json or {})
+    user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
+    user_preferences['_session_id'] = getattr(request, 'device_id', None)
+    cache_key = json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
     def _json_default(o):
         # DB-sourced numbers (lat/lon, rating, cost) may be Decimal, which the
@@ -378,7 +382,9 @@ def edit_itinerary():
         # The id of the itinerary being edited — updated in place after a
         # successful edit. Not part of the prompt/cache key.
         existing_id = user_preferences.pop("itinerary_id", None)
-        cache_key = "edit:" + json.dumps(user_preferences, sort_keys=True)
+        user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
+        user_preferences['_session_id'] = getattr(request, 'device_id', None)
+        cache_key = "edit:" + json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
         result = itinerary_service.recommender.edit_itinerary(user_preferences)
 

@@ -1,3 +1,4 @@
+import atexit
 import multiprocessing as mp
 import os
 import socket
@@ -120,6 +121,16 @@ def health_check():
         description: Service is healthy
     """
     return jsonify({"status": "healthy", "initialized": is_initialized()}), 200
+
+
+def _flush_langfuse():
+    try:
+        from langfuse import get_client
+        get_client().flush()
+    except Exception:
+        pass
+
+atexit.register(_flush_langfuse)
 
 
 if __name__ == "__main__":

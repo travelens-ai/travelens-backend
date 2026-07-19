@@ -40,5 +40,10 @@ AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 AZURE_OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("AZURE_OPENAI_MAX_OUTPUT_TOKENS", "16000"))
 
+# Langfuse observability (optional — disabled when keys are absent)
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+
 # Server
 PORT = int(os.environ.get("PORT", 4000))

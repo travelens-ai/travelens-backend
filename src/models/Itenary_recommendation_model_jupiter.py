@@ -21,6 +21,23 @@ import os
 import random
 import copy
 
+try:
+    from langfuse import observe as _lf_observe, get_client as _lf_get_client, propagate_attributes as _lf_propagate
+    _LF_AVAILABLE = True
+except ImportError:
+    _LF_AVAILABLE = False
+    def _lf_observe(*a, **kw):
+        if a and callable(a[0]):
+            return a[0]
+        return lambda fn: fn
+    def _lf_get_client():
+        return None
+    class _NoopPropagateAttrs:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    def _lf_propagate(**kw):
+        return _NoopPropagateAttrs()
+
 # PKL files live in the project root (one level above src/)
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
@@ -559,6 +576,7 @@ class ItenaryRecommendationSystem:
 
         return edit_place_recommendation.head(20)
     
+    @_lf_observe(name="generate_itinerary")
     def generate_itinerary(self, user_preferences):
         """
         Generate travel itinerary based on user preferences
@@ -587,6 +605,17 @@ class ItenaryRecommendationSystem:
             # Ensure optional key doesn't raise a KeyError
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
+
+            with _lf_propagate(
+                user_id=str(user_preferences.get('_user_id') or ''),
+                session_id=str(user_preferences.get('_session_id') or ''),
+                metadata={
+                    'destination': user_preferences.get('places_of_interest', ''),
+                    'trip_type': user_preferences.get('trip_type', ''),
+                    'trip_duration': user_preferences.get('trip_duration', ''),
+                },
+            ):
+                pass  # sets trace attributes on the current span
 
             # Fetch places, hotels, restaurants in parallel — they are independent
             with ThreadPoolExecutor(max_workers=3) as ex:
@@ -790,6 +819,7 @@ class ItenaryRecommendationSystem:
             traceback.print_exc()
             yield {'event': 'error', 'message': str(e)}
 
+    @_lf_observe(name="edit_itinerary", as_type="generation")
     def edit_itinerary(self, user_preferences):
         """Regenerate an itinerary that MUST include an explicit list of places.
 
@@ -802,6 +832,17 @@ class ItenaryRecommendationSystem:
         try:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
+
+            with _lf_propagate(
+                user_id=str(user_preferences.get('_user_id') or ''),
+                session_id=str(user_preferences.get('_session_id') or ''),
+                metadata={
+                    'destination': user_preferences.get('places_of_interest', ''),
+                    'trip_type': user_preferences.get('trip_type', ''),
+                    'trip_duration': user_preferences.get('trip_duration', ''),
+                },
+            ):
+                pass  # sets trace attributes on the current span
 
             # The extra payload: places that MUST be included in the itinerary.
             edit_places = user_preferences.get('places', []) or []
@@ -839,6 +880,11 @@ class ItenaryRecommendationSystem:
                 input=messages,
                 max_output_tokens=self.max_tokens,
                 text={"format": {"type": "json_object"}},
+            )
+            _lf_get_client().update_current_generation(
+                model=self.chat_deployment,
+                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+                output=response.output_text,
             )
             response_text = self._extract_completed_json(response)
             try:
@@ -1621,6 +1667,7 @@ class ItenaryRecommendationSystem:
 
 
 
+    @_lf_observe(name="destination_description", as_type="generation")
     def _generate_destination_description(self, destination):
         """Generate a short, friendly 1-2 sentence description for a destination
         using a simple prompt. Used for the early `info` event so the user sees
@@ -1639,7 +1686,14 @@ class ItenaryRecommendationSystem:
                 model=self.chat_deployment,
                 input=[{"role": "user", "content": prompt}],
             )
-            return (response.output_text or "").strip()
+            result = (response.output_text or "").strip()
+            _lf_get_client().update_current_generation(
+                model=self.chat_deployment,
+                input=prompt,
+                output=result,
+                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens} if response.usage else None,
+            )
+            return result
         except Exception as e:
             print(f"  _generate_destination_description failed for {destination!r}: {e}")
             return ""
@@ -1872,6 +1926,7 @@ class ItenaryRecommendationSystem:
                 i += 1
         return "".join(out)
 
+    @_lf_observe(name="trip_skeleton", as_type="generation")
     def _generate_trip_skeleton(self, user_preferences, top_places, top_restaurants, top_hotels):
         """Generate ONLY the trip-level fields (no day-by-day itinerary):
         name, description, city, state, price_estimated_range, notes, hotels,
@@ -1886,6 +1941,11 @@ class ItenaryRecommendationSystem:
             input=messages,
             max_output_tokens=self.max_tokens,
             text={"format": {"type": "json_object"}},
+        )
+        _lf_get_client().update_current_generation(
+            model=self.chat_deployment,
+            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+            output=response.output_text,
         )
         response_text = self._extract_completed_json(response)
         # The skeleton has NO `itinerary` key, so parse the first balanced JSON
@@ -1994,6 +2054,7 @@ The user's preferred tier is "{hotel_pref}". Make `selected` the best match for 
             {"role": "user",   "content": user_content},
         ]
 
+    @_lf_observe(name="detailed_itinerary", as_type="generation")
     def _generate_detailed_itinerary(self, user_preferences, top_places, top_hotels, top_restaurants, rest_slot_counts=None):
         places_trimmed = self._trim_for_prompt(top_places, self._PLACE_COLS_PROMPT, 60)
         hotels_trimmed = self._trim_for_prompt(top_hotels, self._HOTEL_COLS_PROMPT, 10)
@@ -2006,6 +2067,11 @@ The user's preferred tier is "{hotel_pref}". Make `selected` the best match for 
             input=messages,
             max_output_tokens=self.max_tokens,
             text={"format": {"type": "json_object"}},
+        )
+        _lf_get_client().update_current_generation(
+            model=self.chat_deployment,
+            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+            output=response.output_text,
         )
         response_text = self._extract_completed_json(response)
         try:
@@ -2089,6 +2155,7 @@ The user's preferred tier is "{hotel_pref}". Make `selected` the best match for 
                     names.append(name)
         return names
 
+    @_lf_observe(name="extra_days", as_type="generation")
     def _generate_extra_days(self, user_preferences, top_places, top_restaurants, top_hotels,
                              start_day, num_days, used_places, itinerary=None, rest_slot_counts=None):
         """Ask the model for exactly `num_days` additional day objects, numbered
@@ -2101,11 +2168,19 @@ The user's preferred tier is "{hotel_pref}". Make `selected` the best match for 
             rest_slot_counts=rest_slot_counts,
         )
         print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
+        _lf_get_client().update_current_span(
+            metadata={"start_day": start_day, "num_days": num_days},
+        )
         response = self.client.responses.create(
             model=self.chat_deployment,
             input=messages,
             max_output_tokens=self.max_tokens,
             text={"format": {"type": "json_object"}},
+        )
+        _lf_get_client().update_current_generation(
+            model=self.chat_deployment,
+            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+            output=response.output_text,
         )
         if itinerary is not None:
             self._accumulate_usage(itinerary, response)
