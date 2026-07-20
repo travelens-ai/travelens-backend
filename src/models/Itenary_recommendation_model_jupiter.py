@@ -2647,6 +2647,14 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
   ]
 }}
 """
+
+        user_content += (
+            f"\n\nBefore you output the JSON, silently verify: does your `itinerary` array "
+            f"have exactly {trip_duration} day objects? "
+            f"If it has fewer, add the missing days before outputting. "
+            f"A response with fewer than {trip_duration} days is incomplete and unusable."
+        )
+
         return [
             {"role": "system", "content": system_content},
             {"role": "user",   "content": user_content},
