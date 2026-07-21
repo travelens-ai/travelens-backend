@@ -44,6 +44,19 @@ AZURE_OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("AZURE_OPENAI_MAX_OUTPUT_TOKENS",
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+# Propagate host so Langfuse SDK picks it up (reads LANGFUSE_HOST from env directly).
+if LANGFUSE_HOST:
+    os.environ.setdefault("LANGFUSE_HOST", LANGFUSE_HOST)
+# Raise the OTLP export timeout (ms) so transient latency doesn't exhaust retries.
+# Must be set before langfuse/opentelemetry initializes — config.py is imported first.
+os.environ.setdefault(
+    "OTEL_EXPORTER_OTLP_TIMEOUT",
+    os.getenv("LANGFUSE_OTEL_TIMEOUT", "30000"),
+)
+# Tune BatchSpanProcessor: smaller batches + shorter schedule reduce timeout collisions.
+os.environ.setdefault("OTEL_BSP_SCHEDULE_DELAY", "2000")
+os.environ.setdefault("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", "64")
+os.environ.setdefault("OTEL_BSP_EXPORT_TIMEOUT", "10000")
 
 # Server
 PORT = int(os.environ.get("PORT", 4000))

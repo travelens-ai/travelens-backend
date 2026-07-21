@@ -1,4 +1,5 @@
 import json
+import uuid
 from decimal import Decimal
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context
@@ -49,7 +50,7 @@ def generate_itinerary():
     try:
         user_preferences = dict(request.json or {})
         user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
-        user_preferences['_session_id'] = getattr(request, 'device_id', None)
+        user_preferences['_session_id'] = str(uuid.uuid4())
         cache_key = json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
         cached_result, cached_id = itinerary_service.get_cached_itinerary(cache_key)
@@ -383,7 +384,7 @@ def edit_itinerary():
         # successful edit. Not part of the prompt/cache key.
         existing_id = user_preferences.pop("itinerary_id", None)
         user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
-        user_preferences['_session_id'] = getattr(request, 'device_id', None)
+        user_preferences['_session_id'] = str(uuid.uuid4())
         cache_key = "edit:" + json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
         result = itinerary_service.recommender.edit_itinerary(user_preferences)

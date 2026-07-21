@@ -467,6 +467,17 @@ class GooglePlacesClient:
             print(f"[GooglePlacesClient] fetch error: {e}")
             return []
 
+    def get_cached_hotels(self, city: str) -> list:
+        """Return cached Google Places hotels without hitting the API. Empty list if not cached."""
+        cached = _db_hotels_get(city)
+        return cached if cached else []
+
+    def get_cached_restaurants(self, city: str, cuisine: str = "") -> list:
+        """Return cached Google Places restaurants without hitting the API. Empty list if not cached."""
+        query_cuisine = cuisine.split(",")[0].strip() if cuisine else ""
+        cached = _db_restaurants_get(city, query_cuisine or "all")
+        return cached if cached else []
+
     def search_hotels(self, city: str) -> list:
         cached = _db_hotels_get(city)
         if cached is not None:
