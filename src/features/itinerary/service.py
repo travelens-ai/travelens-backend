@@ -143,6 +143,32 @@ def store_itinerary(cache_key, user_preferences, result):
     return itinerary_id
 
 
+def get_session_id(itinerary_id):
+    """Return the _session_id stored with the original generate call for this itinerary.
+    Used by /edit so all edits share the same Langfuse session as the original trip."""
+    if not itinerary_id:
+        return None
+    if is_db_ready():
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT request_json FROM itineraries WHERE id = ?", (itinerary_id,))
+            row = cursor.fetchone()
+            cursor.close()
+            if row and row[0]:
+                prefs = json.loads(row[0])
+                return prefs.get('_session_id')
+        except Exception:
+            pass
+        finally:
+            conn.close()
+    # Fall back to in-memory cache: scan for an entry whose stored id matches.
+    for _key, (_, _result, stored_id) in _itinerary_cache.items():
+        if stored_id == itinerary_id:
+            return None  # we don't store prefs separately in the cache tuple
+    return None
+
+
 def update_itinerary(cache_key, itinerary_id, user_preferences, result):
     """Overwrite an existing itinerary row's request/response JSON after a
     successful edit. Returns the itinerary_id if the row was updated, else None

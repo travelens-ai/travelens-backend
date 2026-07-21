@@ -38,12 +38,15 @@ AZURE_OPENAI_ENDPOINT = _normalize_azure_endpoint(os.getenv("AZURE_OPENAI_ENDPOI
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
-AZURE_OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("AZURE_OPENAI_MAX_OUTPUT_TOKENS", "16000"))
+AZURE_OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("AZURE_OPENAI_MAX_OUTPUT_TOKENS", "8000"))
+AZURE_OPENAI_MAX_OUTPUT_TOKENS_DAY = int(os.getenv("AZURE_OPENAI_MAX_OUTPUT_TOKENS_DAY", "2000"))
+AZURE_OPENAI_MAX_OUTPUT_TOKENS_SKELETON = int(os.getenv("AZURE_OPENAI_MAX_OUTPUT_TOKENS_SKELETON", "1500"))
 
 # Langfuse observability (optional — disabled when keys are absent)
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+APP_ENV = os.getenv("APP_ENV", "development")  # development | staging | production
 # Propagate host so Langfuse SDK picks it up (reads LANGFUSE_HOST from env directly).
 if LANGFUSE_HOST:
     os.environ.setdefault("LANGFUSE_HOST", LANGFUSE_HOST)

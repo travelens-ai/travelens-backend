@@ -137,8 +137,6 @@ def attach_db_fields(system, itinerary):
             db = db_lookup.get(key)
             if not db:
                 continue
-            if db.get("opening_hours"):
-                item["opening_hours"] = db["opening_hours"]
             if db.get("website_uri"):
                 item["website_uri"] = db["website_uri"]
             if db.get("phone_number"):
@@ -435,28 +433,37 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
 def finalize_itinerary(system, itinerary, places, start_date=None, user_preferences=None):
     try:
         from models.recommendation import recommendations as _rec
+        from concurrent.futures import ThreadPoolExecutor as _TPE
         places = finalize_trip_level(system, itinerary, places)
 
         days = itinerary.get('itinerary', []) or []
-        itinerary['itinerary'] = finalize_days(
-            system, itinerary, days, places, start_date=start_date, start_day_index=0
-        )
+        token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
+
+        if user_preferences:
+            with _TPE(max_workers=2) as ex:
+                fut_days = ex.submit(
+                    finalize_days, system, itinerary, days, places,
+                    start_date=start_date, start_day_index=0
+                )
+                fut_avail = ex.submit(
+                    _rec.get_available_places, system, itinerary,
+                    user_preferences, 30, scored_df=places
+                )
+            itinerary['itinerary'] = fut_days.result()
+            try:
+                itinerary['available_places'] = fut_avail.result()
+            except Exception as e:
+                print(f"Warning: _get_available_places failed: {e}")
+                itinerary['available_places'] = []
+        else:
+            itinerary['itinerary'] = finalize_days(
+                system, itinerary, days, places, start_date=start_date, start_day_index=0
+            )
 
         try:
             itinerary['total_days'] = int(itinerary['total_days'])
         except (TypeError, ValueError, KeyError):
             itinerary['total_days'] = len(itinerary.get('itinerary', []))
-
-        token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
-
-        if user_preferences:
-            try:
-                itinerary['available_places'] = _rec.get_available_places(
-                    system, itinerary, user_preferences, 30, scored_df=places
-                )
-            except Exception as e:
-                print(f"Warning: _get_available_places failed: {e}")
-                itinerary['available_places'] = []
 
         return {
             'status': 'success',

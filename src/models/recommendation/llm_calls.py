@@ -41,7 +41,9 @@ def places_count_for_trip(trip_duration):
         return 50
     if d >= 7:
         return 40
-    return 30
+    if d >= 3:
+        return 30
+    return 20
 
 
 def accumulate_usage(itinerary, response):
@@ -252,7 +254,7 @@ def generate_trip_skeleton(system, user_preferences, top_places, top_restaurants
     response = system.client.responses.create(
         model=system.chat_deployment,
         input=messages,
-        max_output_tokens=system.max_tokens,
+        max_output_tokens=getattr(system, 'max_tokens_skeleton', system.max_tokens),
         text={"format": {"type": "json_object"}},
     )
     _lf_get_client().update_current_generation(
@@ -289,9 +291,9 @@ def generate_trip_skeleton(system, user_preferences, top_places, top_restaurants
 def generate_detailed_itinerary(system, user_preferences, top_places, top_hotels, top_restaurants, rest_slot_counts=None):
     from prompts import generate_travel_itinerary_prompt
     n_places = places_count_for_trip(user_preferences.get('trip_duration', 3))
-    places_trimmed = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, n_places))
+    places_trimmed = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, n_places), max_chars=50)
     hotels_trimmed = trim_for_prompt(system, top_hotels, HOTEL_COLS_PROMPT, 10)
-    rests_trimmed  = trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, 20)
+    rests_trimmed  = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, 15), max_chars=50)
     messages = generate_travel_itinerary_prompt(
         user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
         rest_slot_counts=rest_slot_counts,
@@ -317,6 +319,9 @@ def generate_detailed_itinerary(system, user_preferences, top_places, top_hotels
         raise
 
     accumulate_usage(itinerary, response)
+    days_received = len(itinerary.get('itinerary') or [])
+    target = user_preferences.get('trip_duration')
+    print(f"[itinerary] received {days_received}/{target} days in first call (tokens used: in={response.usage.input_tokens} out={response.usage.output_tokens})")
     return ensure_full_days(
         system, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
         rest_slot_counts=rest_slot_counts,
@@ -364,6 +369,8 @@ def ensure_full_days(system, itinerary, user_preferences, places_trimmed, rests_
 def generate_extra_days(system, user_preferences, top_places, top_restaurants, top_hotels,
                         start_day, num_days, used_places, itinerary=None, rest_slot_counts=None):
     from prompts import generate_extra_days_prompt
+    top_places = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, len(top_places)), max_chars=80)
+    top_restaurants = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, len(top_restaurants)), max_chars=60)
     messages = generate_extra_days_prompt(
         user_preferences, top_places, top_restaurants, top_hotels,
         start_day=start_day, num_days=num_days, used_places=used_places,
@@ -373,10 +380,11 @@ def generate_extra_days(system, user_preferences, top_places, top_restaurants, t
     _lf_get_client().update_current_span(
         metadata={"start_day": start_day, "num_days": num_days},
     )
+    max_tok = getattr(system, 'max_tokens_day', system.max_tokens) * max(1, num_days)
     response = system.client.responses.create(
         model=system.chat_deployment,
         input=messages,
-        max_output_tokens=system.max_tokens,
+        max_output_tokens=max_tok,
         text={"format": {"type": "json_object"}},
     )
     _lf_get_client().update_current_generation(

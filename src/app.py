@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import sys
+import time as _time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify
@@ -13,6 +14,7 @@ from flasgger import Swagger
 # load_dotenv is called inside core/config.py — must be imported before anything else
 from core import config as _config_init  # noqa: F401 (triggers load_dotenv)
 from core.config import PORT
+from core.langfuse_client import get_langfuse as _get_langfuse
 
 from core.swagger_config import swagger_template, swagger_config
 from core.db import init_db_async
@@ -82,8 +84,40 @@ _SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
 
 def _run(script, args=[]):
     path = os.path.join(_SCRIPTS_DIR, script)
-    subprocess.run([sys.executable, path] + args,
-                   cwd=os.path.dirname(_SCRIPTS_DIR))
+    job_name = os.path.splitext(script)[0]
+    lf = _get_langfuse()
+    trace = lf.trace(
+        name=f"cron.{job_name}",
+        input={"script": script, "args": args},
+        tags=["cron"],
+    ) if lf else None
+
+    t0 = _time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, path] + args,
+            cwd=os.path.dirname(_SCRIPTS_DIR),
+            capture_output=True,
+            text=True,
+        )
+        duration = round(_time.monotonic() - t0, 2)
+        success = proc.returncode == 0
+        output = (proc.stdout or "")[-2000:] or (proc.stderr or "")[-2000:]
+        if trace:
+            trace.update(
+                output={"returncode": proc.returncode, "output": output, "duration_s": duration},
+                tags=["cron"] if success else ["cron", "cron-error"],
+            )
+        if not success:
+            print(f"[cron] {job_name} exited {proc.returncode} after {duration}s\n{output}")
+    except Exception as exc:
+        duration = round(_time.monotonic() - t0, 2)
+        if trace:
+            trace.update(
+                output={"error": str(exc), "duration_s": duration},
+                tags=["cron", "cron-error"],
+            )
+        print(f"[cron] {job_name} failed to launch: {exc}")
 
 _scheduler = BackgroundScheduler(daemon=True)
 _CRON_MODE = os.getenv("CRON_MODE", "off")  # "prod" | "test" | "off"

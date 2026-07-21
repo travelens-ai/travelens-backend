@@ -66,7 +66,7 @@ First try to fit all must-include places within {trip_duration} days. If they do
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
-    user_content = f"""Rebuild this travel itinerary. Every must-include place MUST appear in the final plan.
+    user_content = f"""Rebuild this COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Every must-include place MUST appear. Do not stop after day 1.
 
 ## User Preferences
 - Places of interest: {user_preferences['places_of_interest']}
@@ -85,15 +85,15 @@ First try to fit all must-include places within {trip_duration} days. If they do
 {must_include_block}
 
 ## Recommended Places
-{top_places}
+{top_places.to_csv(index=False)}
 
 ## Restaurants Dataset
-{top_restaurants}
+{top_restaurants.to_csv(index=False)}
 
 {rest_coverage}
 
 ## Hotels Dataset
-{top_hotels}
+{top_hotels.to_csv(index=False)}
 
 ## Rules
 1. Every must-include place must appear in `timeline` (as `type:"place"`) somewhere across the days.
@@ -106,6 +106,7 @@ First try to fit all must-include places within {trip_duration} days. If they do
 8. No repeated places, hotels, or restaurants.
 9. Linear travel flow — no A→B→A.
 10. No placeholder text.
+11. The `itinerary` array MUST have exactly {trip_duration} fully populated day objects. Do not stop early.
 
 ## Output Format
 
@@ -120,6 +121,21 @@ First try to fit all must-include places within {trip_duration} days. If they do
         {{"type": "place", "name": "Must-include Place", "location": "City, State", "reason": "Why it fits", "activities": ["Activity"], "rating": "4.5", "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}}},
         {{"type": "meal", "slot": "lunch", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "near_place": "Must-include Place", "reason": "Great local spot", "suggested_time": "1:30 PM", "duration": "45–60 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min"}}}},
         {{"type": "meal", "slot": "dinner", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60–90 mins", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}}
+      ],
+      "meal_options": {{
+        "breakfast": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.0", "location": "Area", "reason": "Quick option"}}],
+        "lunch": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹350–₹500", "rating": "4.1", "location": "Area", "reason": "Popular local"}}],
+        "dinner": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹500–₹700", "rating": "4.2", "location": "Area", "reason": "Open late"}}]
+      }}
+    }},
+    {{
+      "day": 2,
+      "theme": "...",
+      "day_summary": "...",
+      "timeline": [
+        {{"type": "place", "name": "Place Name", "reason": "Why it fits", "activities": ["Activity"], "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "9:30 AM", "travel_from_prev": null}},
+        {{"type": "meal", "slot": "lunch", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "near_place": "Nearby place", "reason": "Good local spot", "suggested_time": "1:00 PM", "duration": "45 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}}},
+        {{"type": "meal", "slot": "dinner", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60 mins", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}}
       ],
       "meal_options": {{
         "breakfast": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.0", "location": "Area", "reason": "Quick option"}}],

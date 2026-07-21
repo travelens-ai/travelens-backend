@@ -4,7 +4,16 @@ import pickle
 import pandas as pd
 from numpy.linalg import norm
 from core.db import fetch_dicts
-from core.config import AZURE_OPENAI_MAX_OUTPUT_TOKENS
+from core.config import (
+    AZURE_OPENAI_MAX_OUTPUT_TOKENS,
+    AZURE_OPENAI_MAX_OUTPUT_TOKENS_DAY,
+    AZURE_OPENAI_MAX_OUTPUT_TOKENS_SKELETON,
+)
+
+try:
+    from langfuse import get_client as _lf_get_client
+except ImportError:
+    def _lf_get_client(): return None
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
@@ -150,6 +159,8 @@ def setup_models(system):
     try:
         print("Configuring Azure OpenAI client...")
         system.max_tokens = AZURE_OPENAI_MAX_OUTPUT_TOKENS
+        system.max_tokens_day = AZURE_OPENAI_MAX_OUTPUT_TOKENS_DAY
+        system.max_tokens_skeleton = AZURE_OPENAI_MAX_OUTPUT_TOKENS_SKELETON
         system.temperature = 0.5
         system.top_p = 0.5
         print("Azure OpenAI client configured successfully.")
@@ -178,33 +189,42 @@ def load_data(system):
             print("Loaded existing embeddings from pickle files")
         except FileNotFoundError:
             print("Generating new embeddings...")
-            all_activities = set()
-            all_place_types = set()
-            for _, row in system.places_df.iterrows():
-                activities = row['famous activities with rating'].keys()
-                all_activities.update(activities)
-                all_place_types.add(row['type'])
+            lf = _lf_get_client()
+            _lf_trace = lf.trace(name="startup_embedding_generation", tags=["startup"]) if lf else None
+            try:
+                all_activities = set()
+                all_place_types = set()
+                for _, row in system.places_df.iterrows():
+                    activities = row['famous activities with rating'].keys()
+                    all_activities.update(activities)
+                    all_place_types.add(row['type'])
 
-            activity_list = list(all_activities)
-            for i in range(0, len(activity_list), 50):
-                batch = activity_list[i:i + 50]
-                embeddings = system._encode(batch)
-                for text, emb in zip(batch, embeddings):
-                    system.activity_embeddings[text] = emb / norm(emb)
-                print(f"  Encoded activities {i + 1}-{min(i + 50, len(activity_list))} of {len(activity_list)}")
+                activity_list = list(all_activities)
+                for i in range(0, len(activity_list), 50):
+                    batch = activity_list[i:i + 50]
+                    embeddings = system._encode(batch)
+                    for text, emb in zip(batch, embeddings):
+                        system.activity_embeddings[text] = emb / norm(emb)
+                    print(f"  Encoded activities {i + 1}-{min(i + 50, len(activity_list))} of {len(activity_list)}")
 
-            place_type_list = list(all_place_types)
-            for i in range(0, len(place_type_list), 50):
-                batch = place_type_list[i:i + 50]
-                embeddings = system._encode(batch)
-                for text, emb in zip(batch, embeddings):
-                    system.place_type_embeddings[text] = emb / norm(emb)
+                place_type_list = list(all_place_types)
+                for i in range(0, len(place_type_list), 50):
+                    batch = place_type_list[i:i + 50]
+                    embeddings = system._encode(batch)
+                    for text, emb in zip(batch, embeddings):
+                        system.place_type_embeddings[text] = emb / norm(emb)
 
-            with open(os.path.join(_PROJECT_ROOT, 'activity_embeddings.pkl'), 'wb') as f:
-                pickle.dump(system.activity_embeddings, f)
-            with open(os.path.join(_PROJECT_ROOT, 'place_type_embeddings.pkl'), 'wb') as f:
-                pickle.dump(system.place_type_embeddings, f)
-            print("Generated and saved new embeddings")
+                with open(os.path.join(_PROJECT_ROOT, 'activity_embeddings.pkl'), 'wb') as f:
+                    pickle.dump(system.activity_embeddings, f)
+                with open(os.path.join(_PROJECT_ROOT, 'place_type_embeddings.pkl'), 'wb') as f:
+                    pickle.dump(system.place_type_embeddings, f)
+                print("Generated and saved new embeddings")
+            finally:
+                if _lf_trace:
+                    _lf_trace.update(output={
+                        "activities": len(system.activity_embeddings),
+                        "place_types": len(system.place_type_embeddings),
+                    })
 
     except FileNotFoundError as e:
         raise Exception(f"Required data files not found: {str(e)}")

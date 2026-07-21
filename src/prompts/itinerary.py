@@ -94,7 +94,7 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
-    user_content = f"""Generate a {trip_duration}-day travel itinerary using the preferences and datasets below.
+    user_content = f"""Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Do not stop after day 1.
 
 ### User Preferences
 - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
@@ -139,6 +139,7 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
 8. Set `price_estimated_range` to the actual total per-head estimate for the trip; use the user's budget range if it fits, otherwise show the real range.
 9. Include `similar_places` (2–3 alternative destinations).
 10. No placeholder text ("TBD", "N/A"). Only JSON.
+11. The `itinerary` array MUST have exactly {trip_duration} fully populated day objects. Day 2 through day {trip_duration} follow the exact same structure as day 1 — do not stop early.
 
 ### Output Format
 
@@ -187,6 +188,21 @@ Output exactly {trip_duration} day objects in the `itinerary` array (day 1 throu
           {{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.4", "location": "Area", "reason": "Rooftop view"}},
           {{"name": "Alt 2", "cuisine": "Type", "approx_cost": "₹600–₹900", "rating": "4.3", "location": "Area", "reason": "Live music"}}
         ]
+      }}
+    }},
+    {{
+      "day": 2,
+      "theme": "Short day theme",
+      "day_summary": "One-line summary of day 2",
+      "timeline": [
+        {{"type": "place", "name": "Place Name", "reason": "Why it fits", "activities": ["Activity 1"], "opening_hours": "9:00 AM – 5:00 PM", "duration": "2 hours", "suggested_time": "9:30 AM", "travel_from_prev": null}},
+        {{"type": "meal", "slot": "lunch", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area Name", "near_place": "Closest place", "reason": "Great local spot", "suggested_time": "1:00 PM", "duration": "45–60 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}}},
+        {{"type": "meal", "slot": "dinner", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹600–₹900", "rating": "4.4", "location": "Area Name", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60 mins", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}}
+      ],
+      "meal_options": {{
+        "breakfast": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.1", "location": "Area", "reason": "Quick and nearby"}}],
+        "lunch": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹350–₹500", "rating": "4.3", "location": "Area", "reason": "Popular local"}}],
+        "dinner": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.4", "location": "Area", "reason": "Rooftop view"}}]
       }}
     }}
   ]

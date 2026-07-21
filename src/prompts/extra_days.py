@@ -71,7 +71,7 @@ All `approx_cost` values (in timeline and meal_options) must stay within the "{h
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
-    user_content = f"""Extend the itinerary with exactly {num_days} new day object(s), numbered {start_day} through {start_day + num_days - 1}.
+    user_content = f"""Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} through {start_day + num_days - 1}. Do not stop early.
 
 ## Trip context
 - Destination / places of interest: {user_preferences['places_of_interest']}
@@ -101,7 +101,7 @@ All `approx_cost` values (in timeline and meal_options) must stay within the "{h
 {top_hotels.to_csv(index=False)}
 
 ## Rules
-1. Generate EXACTLY {num_days} day object(s) numbered {start_day} to {start_day + num_days - 1}.
+1. Output EXACTLY {num_days} day object(s) numbered {start_day} to {start_day + num_days - 1}. Every day must be fully populated with timeline + meal_options. Do not stop after the first day.
 2. Never reuse a place from the already-used list or repeat within these new days.
 3. Each day: as many geographically close places as fit (min 2), 3 meal slots in timeline, meal_options dict.
 3b. **Meal ordering — strictly enforce every day:** Breakfast → 1 or more place visits → Lunch → 1 or more place visits → Dinner. Never place lunch immediately after breakfast, and never place dinner immediately after lunch — there must always be at least 1 place visit between consecutive meals. Between meals, include as many nearby places as naturally fit — no upper cap.
@@ -189,7 +189,23 @@ All `approx_cost` values (in timeline and meal_options) must stay within the "{h
         {{"name": "Alt 2", "cuisine": "Type", "approx_cost": "₹600–₹900", "rating": "4.4", "location": "Area", "reason": "Sea view"}}
       ]
     }}
-  }}
+  }}{f''',
+  {{
+    "day": {start_day + 1},
+    "theme": "...",
+    "day_summary": "...",
+    "timeline": [
+      {{"type": "meal", "slot": "breakfast", "name": "Restaurant Name", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.1", "location": "Area", "near_place": "First place", "reason": "Quick start", "suggested_time": "8:00 AM", "duration": "30 mins", "travel_from_prev": null}},
+      {{"type": "place", "name": "Place Name", "reason": "Why it fits", "activities": ["Activity"], "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "9:00 AM", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}},
+      {{"type": "meal", "slot": "lunch", "name": "Restaurant Name", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "near_place": "Nearby place", "reason": "Good local spot", "suggested_time": "1:00 PM", "duration": "45 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}}},
+      {{"type": "meal", "slot": "dinner", "name": "Restaurant Name", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60 mins", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}}}
+    ],
+    "meal_options": {{
+      "breakfast": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹100–₹200", "rating": "4.0", "location": "Area", "reason": "Budget-friendly"}}],
+      "lunch": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹350–₹500", "rating": "4.1", "location": "Area", "reason": "Popular local"}}],
+      "dinner": [{{"name": "Alt 1", "cuisine": "Type", "approx_cost": "₹500–₹700", "rating": "4.2", "location": "Area", "reason": "Open late"}}]
+    }}
+  }}''' if num_days > 1 else ''}
 ]}}
 """
     return [

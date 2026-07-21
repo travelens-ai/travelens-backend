@@ -26,16 +26,12 @@ MEAL_COST_CAPS = {
 # Columns sent to the LLM for each dataset — the only gate controlling prompt size.
 PLACE_COLS_PROMPT = [
     'effective_name',
-    'short_formatted_address',
     'primary_type_name',
     'google_rating',
-    'google_rating_count',
-    'rating',
     'famous activities',
-    'best month to visit',
-    'opening_hours',
     'editorial_summary',
     'review_summary',
+    'suitable_for',
 ]
 HOTEL_COLS_PROMPT = ['property_name', 'city', 'hotel_star_rating', 'site_review_rating', 'property_type', 'pageurl']
 REST_COLS_PROMPT  = ['Name', 'City', 'Cuisine', 'Rating', 'Votes', 'Cost', 'Locality', 'suitable_slots']

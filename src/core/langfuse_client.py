@@ -1,12 +1,16 @@
 import logging
-# Langfuse tracing is best-effort; suppress OTLP batch-export warnings to reduce noise.
 logging.getLogger("opentelemetry.sdk.trace.export").setLevel(logging.ERROR)
 
 try:
-    from langfuse import get_client as _get_client
-    from core.config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+    from langfuse import Langfuse
+    from core.config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, APP_ENV
     if LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY:
-        _langfuse = _get_client()
+        _langfuse = Langfuse(
+            public_key=LANGFUSE_PUBLIC_KEY,
+            secret_key=LANGFUSE_SECRET_KEY,
+            host=LANGFUSE_HOST,
+            environment=APP_ENV,
+        )
     else:
         _langfuse = None
 except ImportError:
