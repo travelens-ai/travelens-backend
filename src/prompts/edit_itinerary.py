@@ -73,10 +73,12 @@ def generate_edit_itinerary_prompt(user_preferences, top_places, top_restaurants
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
+    arrival_section = ("## Arrival / Departure\n" + arrival_block) if arrival_block else ""
+
     user_content = f"""## Request context
 - Budget tier: {hotel_pref}
 - Trip duration: {trip_duration} days (may extend if must-include places don't fit)
-{("## Arrival / Departure\n" + arrival_block) if arrival_block else ""}
+{arrival_section}
 Rebuild this COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Every must-include place MUST appear. Do not stop after day 1.
 
 ## User Preferences
