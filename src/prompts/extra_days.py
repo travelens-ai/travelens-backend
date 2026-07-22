@@ -1,24 +1,10 @@
 from prompts.constants import BUDGET_TIER_MAP, MEAL_COST_CAPS, MEAL_TIER_TABLE
 
-
-def generate_extra_days_prompt(user_preferences, top_places, top_restaurants, top_hotels,
-                               start_day, num_days, used_places, rest_slot_counts=None):
-    used_block = ", ".join(used_places) if used_places else "(none yet)"
-    _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
-    hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
-    departure_time = user_preferences.get('departure_time', '').strip()
-    trip_duration = user_preferences.get('trip_duration', num_days)
-
-    arrival_block = ""
-    if departure_time and (start_day + num_days - 1) >= int(trip_duration):
-        arrival_block = (
-            f"\n## DEPARTURE CONTEXT\n"
-            f"- User departs on Day {trip_duration} at {departure_time}. Work backwards: 60–90 min travel buffer + 20–30 min packing.\n"
-            f"- Add hotel check_out before the final activities.\n"
-            f"- Dinner on the last day: include only if time genuinely allows before the travel buffer. If not, skip it and add a note: \"Heading home — grab a quick bite near the station/airport.\"\n"
-        )
-
-    system_content = f"""You are a senior human trip planner extending an existing itinerary with additional days. You think about trips the way a well-travelled friend would — not like a robot filling a schedule.
+# Pre-computed at import time — one static string per tier.
+# Keeps the system prefix identical across all requests on the same tier,
+# maximising Azure OpenAI prefix cache hits.
+def _build_system(tier: str) -> str:
+    return f"""You are a senior human trip planner extending an existing itinerary with additional days. You think about trips the way a well-travelled friend would — not like a robot filling a schedule.
 
 Your entire response must be a single raw JSON object with one key `itinerary` containing an array of the new day objects. Start with {{ and end with }}. No markdown, no code fences, no explanation, no preamble.
 
@@ -51,10 +37,30 @@ City-transition days: last item = check_out old hotel; first item next day = che
 ## meal_options — swappable alternatives per slot
 Each day also has `meal_options` with "breakfast", "lunch", "dinner" arrays (2–3 alternatives each). Fields: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `reason`. No `travel_from_prev`. All must respect the budget tier cap.
 
-## Budget tier for meals: {hotel_pref}
+## Budget tier for meals
 {MEAL_TIER_TABLE}
-All `approx_cost` values (in timeline and meal_options) must stay within the "{hotel_pref}" tier caps above.
-{arrival_block}"""
+User's tier: {tier}. All `approx_cost` values (in timeline and meal_options) must stay within the {tier} tier caps above."""
+
+
+_SYSTEM = {t: _build_system(t) for t in ('budget', 'mid', 'high', 'luxury')}
+
+
+def generate_extra_days_prompt(user_preferences, top_places, top_restaurants, top_hotels,
+                               start_day, num_days, used_places, rest_slot_counts=None):
+    used_block = ", ".join(used_places) if used_places else "(none yet)"
+    _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
+    hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
+    departure_time = user_preferences.get('departure_time', '').strip()
+    trip_duration = user_preferences.get('trip_duration', num_days)
+
+    arrival_block = ""
+    if departure_time and (start_day + num_days - 1) >= int(trip_duration):
+        arrival_block = (
+            f"\n## DEPARTURE CONTEXT\n"
+            f"- User departs on Day {trip_duration} at {departure_time}. Work backwards: 60–90 min travel buffer + 20–30 min packing.\n"
+            f"- Add hotel check_out before the final activities.\n"
+            f"- Dinner on the last day: include only if time genuinely allows before the travel buffer. If not, skip it and add a note: \"Heading home — grab a quick bite near the station/airport.\"\n"
+        )
 
     caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
     b_cap, l_cap, d_cap = caps
@@ -71,7 +77,10 @@ All `approx_cost` values (in timeline and meal_options) must stay within the "{h
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
-    user_content = f"""Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} through {start_day + num_days - 1}. Do not stop early.
+    user_content = f"""## Request context
+- Budget tier: {hotel_pref}
+{arrival_block}
+Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} through {start_day + num_days - 1}. Do not stop early.
 
 ## Trip context
 - Destination / places of interest: {user_preferences['places_of_interest']}
@@ -209,6 +218,6 @@ All `approx_cost` values (in timeline and meal_options) must stay within the "{h
 ]}}
 """
     return [
-        {"role": "system", "content": system_content},
+        {"role": "system", "content": _SYSTEM[hotel_pref]},
         {"role": "user",   "content": user_content},
     ]

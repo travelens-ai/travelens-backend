@@ -1,21 +1,10 @@
 from prompts.constants import BUDGET_TIER_MAP, MEAL_COST_CAPS, MEAL_TIER_TABLE
 
-
-def generate_edit_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels, must_include_places, rest_slot_counts=None):
-    must_include_block = "\n".join(f"  - {name}" for name in must_include_places) or "  (none specified)"
-    trip_duration = user_preferences['trip_duration']
-    _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
-    hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
-    arrival_time = user_preferences.get('arrival_time', '').strip()
-    departure_time = user_preferences.get('departure_time', '').strip()
-
-    arrival_block = ""
-    if arrival_time:
-        arrival_block += f"- User arrives on Day 1 at {arrival_time}. Reason like a smart planner: bag-drop before check-in, sunrise spot if arriving early, lunch on the way if arriving at 2pm.\n"
-    if departure_time:
-        arrival_block += f"- User departs on the last day at {departure_time}. Work backwards: 60–90 min buffer for transport + 20–30 min packing. Include hotel check_out item. Don't over-schedule.\n"
-
-    system_content = f"""You are a senior human trip planner with 20 years of experience crafting real, enjoyable travel itineraries for Indian travellers. You think about trips the way a well-travelled friend would.
+# Pre-computed at import time — one static string per tier.
+# Keeps the system prefix identical across all requests on the same tier,
+# maximising Azure OpenAI prefix cache hits.
+def _build_system(tier: str) -> str:
+    return f"""You are a senior human trip planner with 20 years of experience crafting real, enjoyable travel itineraries for Indian travellers. You think about trips the way a well-travelled friend would.
 
 This is an EDIT request. The user has explicitly chosen specific places. Your primary job is to honour every must-include place — even if it means adding extra days.
 
@@ -32,7 +21,7 @@ A good trip has rhythm. Not every day should be equally packed.
 ## Smart timing
 - Sunrise spots (beaches, ghats, forts, hilltops): before 6 AM; breakfast follows at ~7:30–8 AM.
 - Nightlife days (destination is famous for it or preferred_activities includes "Nightlife"): dinner at 8–9 PM, late-night venue after 10 PM, breakfast next day 9–10 AM (not 7 AM).
-{arrival_block}
+
 ## TIMELINE structure — all items in ONE flat array per day
 Each day's `timeline` is chronological. Every item has `type` (place / meal / hotel).
 - `place`: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`
@@ -44,12 +33,30 @@ Each day's `timeline` is chronological. Every item has `type` (place / meal / ho
 ## meal_options — swappable alternatives per slot
 Each day has `meal_options` with "breakfast", "lunch", "dinner" arrays (2–3 alternatives, no `travel_from_prev`). Fields: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `reason`.
 
-## Budget tier: {hotel_pref}
+## Budget tier: {tier}
 {MEAL_TIER_TABLE}
-All `approx_cost` values must stay within the "{hotel_pref}" tier caps.
+All `approx_cost` values must stay within the {tier} tier caps above.
 
 ## Day count (edit — flexible)
-First try to fit all must-include places within {trip_duration} days. If they don't fit, extend by the minimum extra days needed and update `total_days` with a friendly `notes` message."""
+First try to fit all must-include places within the requested trip duration. If they don't fit, extend by the minimum extra days needed and update `total_days` with a friendly `notes` message."""
+
+
+_SYSTEM = {t: _build_system(t) for t in ('budget', 'mid', 'high', 'luxury')}
+
+
+def generate_edit_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels, must_include_places, rest_slot_counts=None):
+    must_include_block = "\n".join(f"  - {name}" for name in must_include_places) or "  (none specified)"
+    trip_duration = user_preferences['trip_duration']
+    _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
+    hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
+    arrival_time = user_preferences.get('arrival_time', '').strip()
+    departure_time = user_preferences.get('departure_time', '').strip()
+
+    arrival_block = ""
+    if arrival_time:
+        arrival_block += f"- User arrives on Day 1 at {arrival_time}. Reason like a smart planner: bag-drop before check-in, sunrise spot if arriving early, lunch on the way if arriving at 2pm.\n"
+    if departure_time:
+        arrival_block += f"- User departs on the last day at {departure_time}. Work backwards: 60–90 min buffer for transport + 20–30 min packing. Include hotel check_out item. Don't over-schedule.\n"
 
     caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
     b_cap, l_cap, d_cap = caps
@@ -66,7 +73,11 @@ First try to fit all must-include places within {trip_duration} days. If they do
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
-    user_content = f"""Rebuild this COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Every must-include place MUST appear. Do not stop after day 1.
+    user_content = f"""## Request context
+- Budget tier: {hotel_pref}
+- Trip duration: {trip_duration} days (may extend if must-include places don't fit)
+{("## Arrival / Departure\n" + arrival_block) if arrival_block else ""}
+Rebuild this COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Every must-include place MUST appear. Do not stop after day 1.
 
 ## User Preferences
 - Places of interest: {user_preferences['places_of_interest']}
@@ -169,6 +180,6 @@ First try to fit all must-include places within {trip_duration} days. If they do
 }}
 """
     return [
-        {"role": "system", "content": system_content},
+        {"role": "system", "content": _SYSTEM[hotel_pref]},
         {"role": "user",   "content": user_content},
     ]

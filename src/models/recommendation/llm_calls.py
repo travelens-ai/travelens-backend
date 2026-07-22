@@ -402,22 +402,23 @@ def generate_destination_description(system, destination):
     destination = str(destination or "").strip()
     if not destination:
         return ""
+    _SYSTEM_DESC = "You are a travel copywriter. Output only the description text — no titles, quotes, markdown, labels, or commentary."
+
     with lf_span("destination_description", as_type="generation"):
         try:
-            prompt = (
-                f"Write a short, engaging 1-2 sentence travel description for "
-                f"{destination}. Only return the description text — no titles, "
-                f"quotes, markdown, or extra commentary."
-            )
+            user_prompt = f"Write a short, engaging 1-2 sentence travel description for {destination}."
             response = system.client.responses.create(
                 model=system.chat_deployment,
-                input=[{"role": "user", "content": prompt}],
+                input=[
+                    {"role": "system", "content": _SYSTEM_DESC},
+                    {"role": "user", "content": user_prompt},
+                ],
                 reasoning={"effort": "low"},
             )
             result = (response.output_text or "").strip()
             _lf_get_client().update_current_generation(
                 model=system.chat_deployment,
-                input=prompt,
+                input=user_prompt,
                 output=result,
                 usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens} if response.usage else None,
             )
