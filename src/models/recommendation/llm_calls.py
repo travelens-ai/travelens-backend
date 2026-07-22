@@ -1,21 +1,14 @@
 from flask import json
 
 try:
-    from langfuse import observe as _lf_observe, get_client as _lf_get_client, propagate_attributes as _lf_propagate
+    from langfuse import get_client as _lf_get_client
     _LF_AVAILABLE = True
 except ImportError:
     _LF_AVAILABLE = False
-    def _lf_observe(*a, **kw):
-        if a and callable(a[0]):
-            return a[0]
-        return lambda fn: fn
     def _lf_get_client():
         return None
-    class _NoopPropagateAttrs:
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
-    def _lf_propagate(**kw):
-        return _NoopPropagateAttrs()
+
+from models.recommendation.langfuse_helpers import lf_span
 
 from prompts.constants import PLACE_COLS_PROMPT, HOTEL_COLS_PROMPT, REST_COLS_PROMPT
 
@@ -245,87 +238,89 @@ def collect_used_place_names(days):
     return names
 
 
-@_lf_observe(name="trip_skeleton", as_type="generation")
 def generate_trip_skeleton(system, user_preferences, top_places, top_restaurants, top_hotels):
-    from prompts import generate_trip_skeleton_prompt
-    messages = generate_trip_skeleton_prompt(
-        user_preferences, top_places, top_restaurants, top_hotels
-    )
-    response = system.client.responses.create(
-        model=system.chat_deployment,
-        input=messages,
-        max_output_tokens=getattr(system, 'max_tokens_skeleton', system.max_tokens),
-        text={"format": {"type": "json_object"}},
-    )
-    _lf_get_client().update_current_generation(
-        model=system.chat_deployment,
-        usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-        output=response.output_text,
-    )
-    response_text = extract_completed_json(response)
-    skeleton = None
-    for raw in find_json_objects(response_text):
+    with lf_span("trip_skeleton", as_type="generation"):
+        from prompts import generate_trip_skeleton_prompt
+        messages = generate_trip_skeleton_prompt(
+            user_preferences, top_places, top_restaurants, top_hotels
+        )
+        response = system.client.responses.create(
+            model=system.chat_deployment,
+            input=messages,
+            max_output_tokens=getattr(system, 'max_tokens_skeleton', system.max_tokens),
+            reasoning={"effort": "low"},
+            text={"format": {"type": "json_object"}},
+        )
+        _lf_get_client().update_current_generation(
+            model=system.chat_deployment,
+            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+            output=response.output_text,
+        )
+        response_text = extract_completed_json(response)
+        skeleton = None
+        for raw in find_json_objects(response_text):
+            try:
+                obj = json.loads(sanitize_llm_json(raw.strip()), strict=False)
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                skeleton = obj
+                break
+        if skeleton is None:
+            try:
+                skeleton = json.loads(sanitize_llm_json(response_text.strip()), strict=False)
+            except ValueError as e:
+                log_json_decode_error(response, response_text, e)
+                raise
+        if not isinstance(skeleton, dict):
+            skeleton = {}
+        skeleton.setdefault('itinerary', [])
+        skeleton.setdefault('hotels', [])
+        skeleton.setdefault('similar_places', [])
+        accumulate_usage(skeleton, response)
+        return skeleton
+
+
+def generate_detailed_itinerary(system, user_preferences, top_places, top_hotels, top_restaurants, rest_slot_counts=None):
+    with lf_span("detailed_itinerary", as_type="generation"):
+        from prompts import generate_travel_itinerary_prompt
+        n_places = places_count_for_trip(user_preferences.get('trip_duration', 3))
+        places_trimmed = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, n_places), max_chars=50)
+        hotels_trimmed = trim_for_prompt(system, top_hotels, HOTEL_COLS_PROMPT, 10)
+        rests_trimmed  = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, 15), max_chars=50)
+        messages = generate_travel_itinerary_prompt(
+            user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+            rest_slot_counts=rest_slot_counts,
+        )
+        print(f"Prompt length: {sum(len(m['content']) for m in messages)} chars")
+
+        response = system.client.responses.create(
+            model=system.chat_deployment,
+            input=messages,
+            max_output_tokens=system.max_tokens,
+            reasoning={"effort": "low"},
+            text={"format": {"type": "json_object"}},
+        )
+        _lf_get_client().update_current_generation(
+            model=system.chat_deployment,
+            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+            output=response.output_text,
+        )
+        response_text = extract_completed_json(response)
         try:
-            obj = json.loads(sanitize_llm_json(raw.strip()), strict=False)
-        except ValueError:
-            continue
-        if isinstance(obj, dict):
-            skeleton = obj
-            break
-    if skeleton is None:
-        try:
-            skeleton = json.loads(sanitize_llm_json(response_text.strip()), strict=False)
+            itinerary = parse_itinerary_json(response_text)
         except ValueError as e:
             log_json_decode_error(response, response_text, e)
             raise
-    if not isinstance(skeleton, dict):
-        skeleton = {}
-    skeleton.setdefault('itinerary', [])
-    skeleton.setdefault('hotels', [])
-    skeleton.setdefault('similar_places', [])
-    accumulate_usage(skeleton, response)
-    return skeleton
 
-
-@_lf_observe(name="detailed_itinerary", as_type="generation")
-def generate_detailed_itinerary(system, user_preferences, top_places, top_hotels, top_restaurants, rest_slot_counts=None):
-    from prompts import generate_travel_itinerary_prompt
-    n_places = places_count_for_trip(user_preferences.get('trip_duration', 3))
-    places_trimmed = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, n_places), max_chars=50)
-    hotels_trimmed = trim_for_prompt(system, top_hotels, HOTEL_COLS_PROMPT, 10)
-    rests_trimmed  = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, 15), max_chars=50)
-    messages = generate_travel_itinerary_prompt(
-        user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-        rest_slot_counts=rest_slot_counts,
-    )
-    print(f"Prompt length: {sum(len(m['content']) for m in messages)} chars")
-
-    response = system.client.responses.create(
-        model=system.chat_deployment,
-        input=messages,
-        max_output_tokens=system.max_tokens,
-        text={"format": {"type": "json_object"}},
-    )
-    _lf_get_client().update_current_generation(
-        model=system.chat_deployment,
-        usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-        output=response.output_text,
-    )
-    response_text = extract_completed_json(response)
-    try:
-        itinerary = parse_itinerary_json(response_text)
-    except ValueError as e:
-        log_json_decode_error(response, response_text, e)
-        raise
-
-    accumulate_usage(itinerary, response)
-    days_received = len(itinerary.get('itinerary') or [])
-    target = user_preferences.get('trip_duration')
-    print(f"[itinerary] received {days_received}/{target} days in first call (tokens used: in={response.usage.input_tokens} out={response.usage.output_tokens})")
-    return ensure_full_days(
-        system, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-        rest_slot_counts=rest_slot_counts,
-    )
+        accumulate_usage(itinerary, response)
+        days_received = len(itinerary.get('itinerary') or [])
+        target = user_preferences.get('trip_duration')
+        print(f"[itinerary] received {days_received}/{target} days in first call (tokens used: in={response.usage.input_tokens} out={response.usage.output_tokens})")
+        return ensure_full_days(
+            system, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+            rest_slot_counts=rest_slot_counts,
+        )
 
 
 def ensure_full_days(system, itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, rest_slot_counts=None):
@@ -365,66 +360,68 @@ def ensure_full_days(system, itinerary, user_preferences, places_trimmed, rests_
     return itinerary
 
 
-@_lf_observe(name="extra_days", as_type="generation")
 def generate_extra_days(system, user_preferences, top_places, top_restaurants, top_hotels,
                         start_day, num_days, used_places, itinerary=None, rest_slot_counts=None):
-    from prompts import generate_extra_days_prompt
-    top_places = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, len(top_places)), max_chars=80)
-    top_restaurants = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, len(top_restaurants)), max_chars=60)
-    messages = generate_extra_days_prompt(
-        user_preferences, top_places, top_restaurants, top_hotels,
-        start_day=start_day, num_days=num_days, used_places=used_places,
-        rest_slot_counts=rest_slot_counts,
-    )
-    print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
-    _lf_get_client().update_current_span(
-        metadata={"start_day": start_day, "num_days": num_days},
-    )
-    max_tok = getattr(system, 'max_tokens_day', system.max_tokens) * max(1, num_days)
-    response = system.client.responses.create(
-        model=system.chat_deployment,
-        input=messages,
-        max_output_tokens=max_tok,
-        text={"format": {"type": "json_object"}},
-    )
-    _lf_get_client().update_current_generation(
-        model=system.chat_deployment,
-        usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-        output=response.output_text,
-    )
-    if itinerary is not None:
-        accumulate_usage(itinerary, response)
-    response_text = extract_completed_json(response)
-    try:
-        return parse_days_json(response_text)
-    except ValueError as e:
-        log_json_decode_error(response, response_text, e)
-        return []
+    with lf_span("extra_days", as_type="generation"):
+        from prompts import generate_extra_days_prompt
+        top_places = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, len(top_places)), max_chars=80)
+        top_restaurants = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, len(top_restaurants)), max_chars=60)
+        messages = generate_extra_days_prompt(
+            user_preferences, top_places, top_restaurants, top_hotels,
+            start_day=start_day, num_days=num_days, used_places=used_places,
+            rest_slot_counts=rest_slot_counts,
+        )
+        print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
+        _lf_get_client().update_current_span(
+            metadata={"start_day": start_day, "num_days": num_days},
+        )
+        max_tok = getattr(system, 'max_tokens_day', system.max_tokens) * max(1, num_days)
+        response = system.client.responses.create(
+            model=system.chat_deployment,
+            input=messages,
+            max_output_tokens=max_tok,
+            reasoning={"effort": "low"},
+            text={"format": {"type": "json_object"}},
+        )
+        _lf_get_client().update_current_generation(
+            model=system.chat_deployment,
+            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+            output=response.output_text,
+        )
+        if itinerary is not None:
+            accumulate_usage(itinerary, response)
+        response_text = extract_completed_json(response)
+        try:
+            return parse_days_json(response_text)
+        except ValueError as e:
+            log_json_decode_error(response, response_text, e)
+            return []
 
 
-@_lf_observe(name="destination_description", as_type="generation")
 def generate_destination_description(system, destination):
     destination = str(destination or "").strip()
     if not destination:
         return ""
-    try:
-        prompt = (
-            f"Write a short, engaging 1-2 sentence travel description for "
-            f"{destination}. Only return the description text — no titles, "
-            f"quotes, markdown, or extra commentary."
-        )
-        response = system.client.responses.create(
-            model=system.chat_deployment,
-            input=[{"role": "user", "content": prompt}],
-        )
-        result = (response.output_text or "").strip()
-        _lf_get_client().update_current_generation(
-            model=system.chat_deployment,
-            input=prompt,
-            output=result,
-            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens} if response.usage else None,
-        )
-        return result
-    except Exception as e:
-        print(f"  _generate_destination_description failed for {destination!r}: {e}")
-        return ""
+    with lf_span("destination_description", as_type="generation"):
+        try:
+            prompt = (
+                f"Write a short, engaging 1-2 sentence travel description for "
+                f"{destination}. Only return the description text — no titles, "
+                f"quotes, markdown, or extra commentary."
+            )
+            response = system.client.responses.create(
+                model=system.chat_deployment,
+                input=[{"role": "user", "content": prompt}],
+                reasoning={"effort": "low"},
+            )
+            result = (response.output_text or "").strip()
+            _lf_get_client().update_current_generation(
+                model=system.chat_deployment,
+                input=prompt,
+                output=result,
+                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens} if response.usage else None,
+            )
+            return result
+        except Exception as e:
+            print(f"  _generate_destination_description failed for {destination!r}: {e}")
+            return ""

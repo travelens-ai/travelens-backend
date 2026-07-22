@@ -1,6 +1,7 @@
 import pandas as pd
 from models.recommendation import scoring as _sc
 from models.recommendation import image_helpers as _img
+from models.recommendation.langfuse_helpers import lf_span, lf_update_span
 from prompts.constants import (
     BUDGET_TIER_MAP, HOTEL_TIER_STARS, MEAL_COST_CAPS,
     PLACE_COLS_PROMPT, HOTEL_COLS_PROMPT, REST_COLS_PROMPT,
@@ -9,53 +10,58 @@ from numpy.linalg import norm
 
 
 def get_place_recommendations(system, user_preferences):
-    user_embedding = _sc.generate_user_embedding(system, user_preferences)
-    user_embedding = user_embedding / norm(user_embedding)
-
-    top_places = system.places_df.copy()
-    top_places['image'] = top_places['image'].apply(
-        lambda x: x if isinstance(x, str) and x.endswith('.webp') else None
-    )
-    top_places['activity_score'] = top_places['famous activities with rating'].apply(
-        lambda x: _sc.compute_activity_score(system, x, user_embedding)
-    )
-    top_places['trip_type_score'] = top_places['type'].apply(
-        lambda x: _sc.compute_trip_type_score(system, x, user_embedding)
-    )
-
     poi = user_preferences["places_of_interest"]
-    preferred_location = (", ".join(poi) if isinstance(poi, list) else str(poi)).lower()
-    location_parts = [part.strip() for part in preferred_location.split(",")]
+    destination = ", ".join(poi) if isinstance(poi, list) else str(poi)
+    activities = user_preferences.get("activities", [])
+    with lf_span("place_recommendations", input={"destination": destination, "activities": activities}):
+        user_embedding = _sc.generate_user_embedding(system, user_preferences)
+        user_embedding = user_embedding / norm(user_embedding)
 
-    city_matches = top_places[
-        top_places['city'].fillna('').astype(str).str.lower().apply(
-            lambda city: any(part == city for part in location_parts)
+        top_places = system.places_df.copy()
+        top_places['image'] = top_places['image'].apply(
+            lambda x: x if isinstance(x, str) and x.endswith('.webp') else None
         )
-    ]
-    if not city_matches.empty:
-        top_places = city_matches.copy()
-    else:
-        top_places = top_places[
-            top_places['state'].fillna('').astype(str).str.lower().apply(
-                lambda state: any(part == state for part in location_parts))
-        ].copy()
+        top_places['activity_score'] = top_places['famous activities with rating'].apply(
+            lambda x: _sc.compute_activity_score(system, x, user_embedding)
+        )
+        top_places['trip_type_score'] = top_places['type'].apply(
+            lambda x: _sc.compute_trip_type_score(system, x, user_embedding)
+        )
 
-    C = top_places['rating'].mean()
-    top_places['rating_score'] = top_places.apply(
-        lambda x: _sc.weighted_place_rating(system, x, C), axis=1
-    )
-    for column in ['activity_score', 'trip_type_score', 'rating_score']:
-        min_val = top_places[column].min()
-        max_val = top_places[column].max()
-        rng = max_val - min_val
-        top_places[column] = (top_places[column] - min_val) / rng if rng > 0 else 1.0
+        preferred_location = destination.lower()
+        location_parts = [part.strip() for part in preferred_location.split(",")]
 
-    top_places['final_score'] = (
-        0.5 * top_places['activity_score'] +
-        0.3 * top_places['trip_type_score'] +
-        0.2 * top_places['rating_score']
-    )
-    return top_places.sort_values('final_score', ascending=False).head(100)
+        city_matches = top_places[
+            top_places['city'].fillna('').astype(str).str.lower().apply(
+                lambda city: any(part == city for part in location_parts)
+            )
+        ]
+        if not city_matches.empty:
+            top_places = city_matches.copy()
+        else:
+            top_places = top_places[
+                top_places['state'].fillna('').astype(str).str.lower().apply(
+                    lambda state: any(part == state for part in location_parts))
+            ].copy()
+
+        C = top_places['rating'].mean()
+        top_places['rating_score'] = top_places.apply(
+            lambda x: _sc.weighted_place_rating(system, x, C), axis=1
+        )
+        for column in ['activity_score', 'trip_type_score', 'rating_score']:
+            min_val = top_places[column].min()
+            max_val = top_places[column].max()
+            rng = max_val - min_val
+            top_places[column] = (top_places[column] - min_val) / rng if rng > 0 else 1.0
+
+        top_places['final_score'] = (
+            0.5 * top_places['activity_score'] +
+            0.3 * top_places['trip_type_score'] +
+            0.2 * top_places['rating_score']
+        )
+        result = top_places.sort_values('final_score', ascending=False).head(100)
+        lf_update_span(output={"count": len(result)})
+        return result
 
 
 def enrich_place_images(system, places_df):
@@ -75,39 +81,48 @@ def enrich_place_images(system, places_df):
 def get_hotel_recommendations(system, user_preferences):
     poi = user_preferences["places_of_interest"]
     city = ", ".join(poi) if isinstance(poi, list) else str(poi)
-    city_part = city.split(',')[0].strip().lower()
+    budget = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or '')
+    with lf_span("hotel_recommendations", input={"destination": city, "budget": budget}):
+        city_part = city.split(',')[0].strip().lower()
 
-    # 1. Azure SQL / CSV (in-memory, loaded at startup)
-    top_hotels = system.hotels_df[
-        system.hotels_df['city'].fillna('').astype(str).str.lower().str.contains(city_part, na=False) |
-        system.hotels_df['address'].fillna('').astype(str).str.lower().str.contains(city_part, na=False)
-    ].sort_values('site_review_rating', ascending=False)
+        # 1. Azure SQL / CSV (in-memory, loaded at startup)
+        top_hotels = system.hotels_df[
+            system.hotels_df['city'].fillna('').astype(str).str.lower().str.contains(city_part, na=False) |
+            system.hotels_df['address'].fillna('').astype(str).str.lower().str.contains(city_part, na=False)
+        ].sort_values('site_review_rating', ascending=False)
 
-    raw = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or '').strip().lower()
-    pref = BUDGET_TIER_MAP.get(raw, raw)
-    if pref in HOTEL_TIER_STARS:
-        lo, hi = HOTEL_TIER_STARS[pref]
-        in_tier = top_hotels[top_hotels['hotel_star_rating'].between(lo, hi, inclusive='both')]
-        if len(in_tier) < 3:
-            in_tier = top_hotels[
-                top_hotels['hotel_star_rating'].between(max(0, lo - 1), min(5, hi + 1), inclusive='both')
-            ]
-        top_hotels = in_tier.reset_index(drop=True)
+        raw = budget.strip().lower()
+        pref = BUDGET_TIER_MAP.get(raw, raw)
+        if pref in HOTEL_TIER_STARS:
+            lo, hi = HOTEL_TIER_STARS[pref]
+            in_tier = top_hotels[top_hotels['hotel_star_rating'].between(lo, hi, inclusive='both')]
+            if len(in_tier) < 3:
+                in_tier = top_hotels[
+                    top_hotels['hotel_star_rating'].between(max(0, lo - 1), min(5, hi + 1), inclusive='both')
+                ]
+            top_hotels = in_tier.reset_index(drop=True)
 
-    if not top_hotels.empty:
+        if not top_hotels.empty:
+            result = top_hotels.head(100)
+            lf_update_span(output={"count": len(result), "source": "db"})
+            return result
+
+        # 2. SQLite cache (previously fetched Google Places results)
+        cached = system.places_client.get_cached_hotels(city)
+        if cached:
+            result = pd.DataFrame(cached).head(100)
+            lf_update_span(output={"count": len(result), "source": "cache"})
+            return result
+
+        # 3. Live Google Places API
+        live_hotels = system.places_client.search_hotels(city)
+        if live_hotels:
+            result = pd.DataFrame(live_hotels).head(100)
+            lf_update_span(output={"count": len(result), "source": "api"})
+            return result
+
+        lf_update_span(output={"count": 0, "source": "empty"})
         return top_hotels.head(100)
-
-    # 2. SQLite cache (previously fetched Google Places results)
-    cached = system.places_client.get_cached_hotels(city)
-    if cached:
-        return pd.DataFrame(cached).head(100)
-
-    # 3. Live Google Places API
-    live_hotels = system.places_client.search_hotels(city)
-    if live_hotels:
-        return pd.DataFrame(live_hotels).head(100)
-
-    return top_hotels.head(100)
 
 
 def get_restaurant_recommendations(system, user_preferences):
@@ -115,71 +130,76 @@ def get_restaurant_recommendations(system, user_preferences):
     city = ", ".join(poi) if isinstance(poi, list) else str(poi)
     cuisine_raw = user_preferences["food_preferences"]
     cuisine = ", ".join(cuisine_raw) if isinstance(cuisine_raw, list) else str(cuisine_raw)
+    with lf_span("restaurant_recommendations", input={"destination": city, "cuisine": cuisine}):
+        raw = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or '').strip().lower()
+        pref = BUDGET_TIER_MAP.get(raw, raw)
+        caps = MEAL_COST_CAPS.get(pref)
 
-    raw = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or '').strip().lower()
-    pref = BUDGET_TIER_MAP.get(raw, raw)
-    caps = MEAL_COST_CAPS.get(pref)
+        def _annotate_and_count(df):
+            df = df.copy()
+            if caps and 'Cost' in df.columns:
+                b_max, l_max, d_max = caps
+                b2, l2, d2 = b_max * 2, l_max * 2, d_max * 2
+                cost_col = pd.to_numeric(df['Cost'], errors='coerce')
+                unknown = cost_col.isna() | (cost_col == 0)
+                df = df[unknown | (cost_col <= d2)].copy()
+                cost_col = pd.to_numeric(df['Cost'], errors='coerce')
 
-    def _annotate_and_count(df):
-        df = df.copy()
-        if caps and 'Cost' in df.columns:
-            b_max, l_max, d_max = caps
-            b2, l2, d2 = b_max * 2, l_max * 2, d_max * 2
-            cost_col = pd.to_numeric(df['Cost'], errors='coerce')
-            unknown = cost_col.isna() | (cost_col == 0)
-            df = df[unknown | (cost_col <= d2)].copy()
-            cost_col = pd.to_numeric(df['Cost'], errors='coerce')
+                def _slots(c):
+                    if pd.isna(c) or c == 0: return 'breakfast,lunch,dinner'
+                    if c <= b2:              return 'breakfast,lunch,dinner'
+                    if c <= l2:             return 'lunch,dinner'
+                    return 'dinner'
+                df['suitable_slots'] = cost_col.apply(_slots)
+            else:
+                df['suitable_slots'] = 'breakfast,lunch,dinner'
 
-            def _slots(c):
-                if pd.isna(c) or c == 0: return 'breakfast,lunch,dinner'
-                if c <= b2:              return 'breakfast,lunch,dinner'
-                if c <= l2:             return 'lunch,dinner'
-                return 'dinner'
-            df['suitable_slots'] = cost_col.apply(_slots)
-        else:
-            df['suitable_slots'] = 'breakfast,lunch,dinner'
+            slots_str = df['suitable_slots'].astype(str)
+            slot_counts = {
+                'breakfast': int(slots_str.str.contains('breakfast').sum()),
+                'lunch':     int(slots_str.str.contains('lunch').sum()),
+                'dinner':    int(slots_str.str.contains('dinner').sum()),
+            }
+            return df, slot_counts
 
-        slots_str = df['suitable_slots'].astype(str)
-        slot_counts = {
-            'breakfast': int(slots_str.str.contains('breakfast').sum()),
-            'lunch':     int(slots_str.str.contains('lunch').sum()),
-            'dinner':    int(slots_str.str.contains('dinner').sum()),
-        }
-        return df, slot_counts
+        # 1. Azure SQL / CSV (in-memory, loaded at startup)
+        preferred_cuisines = [_sc.normalize(system, c) for c in cuisine.split(',')]
+        city_part = _sc.normalize(system, city.split(',')[0])
+        cuisine_pattern = '|'.join(preferred_cuisines)
 
-    # 1. Azure SQL / CSV (in-memory, loaded at startup)
-    preferred_cuisines = [_sc.normalize(system, c) for c in cuisine.split(',')]
-    city_part = _sc.normalize(system, city.split(',')[0])
-    cuisine_pattern = '|'.join(preferred_cuisines)
+        top_restaurants = system.restaurants_df[
+            (system.restaurants_df['City'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False) |
+             system.restaurants_df['Locality'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False)) &
+            system.restaurants_df['Cuisine'].apply(lambda x: _sc.normalize(system, x)).str.contains(cuisine_pattern, na=False)
+        ].sort_values('Rating', ascending=False)
+        top_restaurants = top_restaurants.drop_duplicates(subset=['Name'], keep='first')
 
-    top_restaurants = system.restaurants_df[
-        (system.restaurants_df['City'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False) |
-         system.restaurants_df['Locality'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False)) &
-        system.restaurants_df['Cuisine'].apply(lambda x: _sc.normalize(system, x)).str.contains(cuisine_pattern, na=False)
-    ].sort_values('Rating', ascending=False)
-    top_restaurants = top_restaurants.drop_duplicates(subset=['Name'], keep='first')
+        C = top_restaurants['Rating'].mean()
+        top_restaurants = top_restaurants.copy()
+        top_restaurants['rating_score'] = top_restaurants.apply(
+            lambda x: _sc.weighted_restaurants_rating(system, x, C), axis=1
+        )
+        top_restaurants = top_restaurants.sort_values('rating_score', ascending=False)
 
-    C = top_restaurants['Rating'].mean()
-    top_restaurants = top_restaurants.copy()
-    top_restaurants['rating_score'] = top_restaurants.apply(
-        lambda x: _sc.weighted_restaurants_rating(system, x, C), axis=1
-    )
-    top_restaurants = top_restaurants.sort_values('rating_score', ascending=False)
+        def _return(df_slots, source):
+            df, slot_counts = df_slots
+            lf_update_span(output={"count": len(df), "source": source, "slot_counts": slot_counts})
+            return df, slot_counts
 
-    if not top_restaurants.empty:
-        return _annotate_and_count(top_restaurants.head(100))
+        if not top_restaurants.empty:
+            return _return(_annotate_and_count(top_restaurants.head(100)), "db")
 
-    # 2. SQLite cache (previously fetched Google Places results)
-    cached = system.places_client.get_cached_restaurants(city, cuisine)
-    if cached:
-        return _annotate_and_count(pd.DataFrame(cached).head(100))
+        # 2. SQLite cache (previously fetched Google Places results)
+        cached = system.places_client.get_cached_restaurants(city, cuisine)
+        if cached:
+            return _return(_annotate_and_count(pd.DataFrame(cached).head(100)), "cache")
 
-    # 3. Live Google Places API
-    live_restaurants = system.places_client.search_restaurants(city, cuisine)
-    if live_restaurants:
-        return _annotate_and_count(pd.DataFrame(live_restaurants).head(100))
+        # 3. Live Google Places API
+        live_restaurants = system.places_client.search_restaurants(city, cuisine)
+        if live_restaurants:
+            return _return(_annotate_and_count(pd.DataFrame(live_restaurants).head(100)), "api")
 
-    return _annotate_and_count(top_restaurants.head(100))
+        return _return(_annotate_and_count(top_restaurants.head(100)), "empty")
 
 
 def get_available_places(system, itinerary, user_preferences, count, scored_df=None):

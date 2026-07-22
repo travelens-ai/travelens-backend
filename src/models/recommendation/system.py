@@ -1,3 +1,4 @@
+import contextvars
 import numpy as np
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from models.recommendation import recommendations as _rec
 from models.recommendation import finalization as _fin
 from models.recommendation import llm_calls as _llm
 from models.recommendation import db_persistence as _dbp
+from models.recommendation.langfuse_helpers import lf_span, lf_update_span
 
 try:
     from langfuse import observe as _lf_observe, get_client as _lf_get_client, propagate_attributes as _lf_propagate
@@ -358,41 +360,54 @@ class ItenaryRecommendationSystem:
     # Public API
     # ------------------------------------------------------------------
 
-    @_lf_observe(name="generate_itinerary")
     def generate_itinerary(self, user_preferences):
         try:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
 
-            with _lf_propagate(
-                user_id=str(user_preferences.get('_user_id') or ''),
-                session_id=str(user_preferences.get('_session_id') or ''),
-                metadata={
-                    'destination': user_preferences.get('places_of_interest', ''),
-                    'trip_type': user_preferences.get('trip_type', ''),
-                    'trip_duration': user_preferences.get('trip_duration', ''),
-                },
-            ):
-                with ThreadPoolExecutor(max_workers=3) as ex:
-                    fut_places = ex.submit(self._get_place_recommendations, user_preferences)
-                    fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
-                    fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
-                    places                    = fut_places.result()
-                    hotels                    = fut_hotels.result()
-                    restaurants, rest_slots   = fut_rests.result()
+            with lf_span("generate_itinerary"):
+                with _lf_propagate(
+                    user_id=str(user_preferences.get('_user_id') or ''),
+                    session_id=str(user_preferences.get('_session_id') or ''),
+                    metadata={
+                        'destination': user_preferences.get('places_of_interest', ''),
+                        'trip_type': user_preferences.get('trip_type', ''),
+                        'trip_duration': user_preferences.get('trip_duration', ''),
+                    },
+                ):
+                    _dr_input = {
+                        'destination': user_preferences.get('places_of_interest', ''),
+                        'trip_type': user_preferences.get('trip_type', ''),
+                        'trip_duration': user_preferences.get('trip_duration', ''),
+                    }
+                    with lf_span("data_retrieval", input=_dr_input):
+                        with ThreadPoolExecutor(max_workers=3) as ex:
+                            fut_places = ex.submit(contextvars.copy_context().run, self._get_place_recommendations, user_preferences)
+                            fut_hotels = ex.submit(contextvars.copy_context().run, self._get_hotel_recommendations, user_preferences)
+                            fut_rests  = ex.submit(contextvars.copy_context().run, self._get_restaurant_recommendations, user_preferences)
+                            places                    = fut_places.result()
+                            hotels                    = fut_hotels.result()
+                            restaurants, rest_slots   = fut_rests.result()
+                        lf_update_span(output={
+                            'places_count': len(places),
+                            'hotels_count': len(hotels),
+                            'restaurants_count': len(restaurants),
+                        })
 
-                threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
+                    threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
 
-                itinerary = self._generate_detailed_itinerary(
-                    user_preferences, places, hotels, restaurants,
-                    rest_slot_counts=rest_slots,
-                )
+                    with lf_span("llm_generation"):
+                        itinerary = self._generate_detailed_itinerary(
+                            user_preferences, places, hotels, restaurants,
+                            rest_slot_counts=rest_slots,
+                        )
 
-                return self._finalize_itinerary(
-                    itinerary, places,
-                    start_date=user_preferences.get('start_date'),
-                    user_preferences=user_preferences,
-                )
+                    with lf_span("finalization"):
+                        return self._finalize_itinerary(
+                            itinerary, places,
+                            start_date=user_preferences.get('start_date'),
+                            user_preferences=user_preferences,
+                        )
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing:", e)
@@ -402,19 +417,34 @@ class ItenaryRecommendationSystem:
         from flask import json
         import pandas as pd
 
+        # Root trace for streaming path — observations are entered/exited around yields.
+        _stream_span = _lf_get_client().start_as_current_observation(name="generate_itinerary_stream") if _LF_AVAILABLE else None
+        if _stream_span:
+            _stream_span.__enter__()
+
         try:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
 
             yield {'event': 'progress', 'step': 'started', 'message': 'Starting your itinerary...'}
 
-            with ThreadPoolExecutor(max_workers=3) as ex:
-                fut_places = ex.submit(self._get_place_recommendations, user_preferences)
-                fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
-                fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
-                places                    = fut_places.result()
-                hotels                    = fut_hotels.result()
-                restaurants, rest_slots   = fut_rests.result()
+            with lf_span("data_retrieval", input={
+                'destination': user_preferences.get('places_of_interest', ''),
+                'trip_type': user_preferences.get('trip_type', ''),
+                'trip_duration': user_preferences.get('trip_duration', ''),
+            }):
+                with ThreadPoolExecutor(max_workers=3) as ex:
+                    fut_places = ex.submit(contextvars.copy_context().run, self._get_place_recommendations, user_preferences)
+                    fut_hotels = ex.submit(contextvars.copy_context().run, self._get_hotel_recommendations, user_preferences)
+                    fut_rests  = ex.submit(contextvars.copy_context().run, self._get_restaurant_recommendations, user_preferences)
+                    places                    = fut_places.result()
+                    hotels                    = fut_hotels.result()
+                    restaurants, rest_slots   = fut_rests.result()
+                lf_update_span(output={
+                    'places_count': len(places),
+                    'hotels_count': len(hotels),
+                    'restaurants_count': len(restaurants),
+                })
 
             threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
             yield {'event': 'progress', 'step': 'places', 'message': 'Found places to visit'}
@@ -427,19 +457,20 @@ class ItenaryRecommendationSystem:
             yield {'event': 'progress', 'step': 'info', 'message': 'Preparing your trip overview...'}
 
             # Fire skeleton and day-1 LLM calls concurrently — skeleton has no dependency on day-1.
-            with ThreadPoolExecutor(max_workers=2) as ex:
-                fut_skeleton = ex.submit(
-                    self._generate_trip_skeleton,
-                    user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-                )
-                fut_day1 = ex.submit(
-                    self._generate_extra_days,
-                    user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-                    start_day=1, num_days=1, used_places=[],
-                    itinerary=None, rest_slot_counts=rest_slots,
-                )
-            itinerary = fut_skeleton.result()
-            day1_prefetched = fut_day1.result()
+            with lf_span("llm_generation"):
+                with ThreadPoolExecutor(max_workers=2) as ex:
+                    fut_skeleton = ex.submit(
+                        contextvars.copy_context().run, self._generate_trip_skeleton,
+                        user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+                    )
+                    fut_day1 = ex.submit(
+                        contextvars.copy_context().run, self._generate_extra_days,
+                        user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+                        start_day=1, num_days=1, used_places=[],
+                        itinerary=None, rest_slot_counts=rest_slots,
+                    )
+                itinerary = fut_skeleton.result()
+                day1_prefetched = fut_day1.result()
 
             itinerary.setdefault('itinerary', [])
 
@@ -505,10 +536,11 @@ class ItenaryRecommendationSystem:
                 day = extra[0]
                 day_no = len(built_days) + 1
                 day['day'] = day_no
-                finalized = self._finalize_days(
-                    itinerary, [day], places, start_date=start_date,
-                    start_day_index=day_no - 1,
-                )
+                with lf_span("finalization"):
+                    finalized = self._finalize_days(
+                        itinerary, [day], places, start_date=start_date,
+                        start_day_index=day_no - 1,
+                    )
                 day = finalized[0] if finalized else day
                 built_days.append(day)
                 used_places.extend(self._collect_used_place_names([day]))
@@ -530,20 +562,21 @@ class ItenaryRecommendationSystem:
             itinerary['itinerary'] = built_days
             itinerary['total_days'] = len(built_days)
 
-            try:
-                available = self._get_available_places(itinerary, user_preferences, 30, scored_df=places)
-            except Exception as e:
-                print(f"Warning: _get_available_places failed: {e}")
-                available = []
-            itinerary['available_places'] = available
-            yield {'event': 'available_places', 'available_places': available}
+            with lf_span("output_assembly"):
+                try:
+                    available = self._get_available_places(itinerary, user_preferences, 30, scored_df=places)
+                except Exception as e:
+                    print(f"Warning: _get_available_places failed: {e}")
+                    available = []
+                itinerary['available_places'] = available
+                yield {'event': 'available_places', 'available_places': available}
 
-            token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
-            result = {
-                'status': 'success',
-                'token_usage': token_usage,
-                'data': {'detailed_itinerary': itinerary},
-            }
+                token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
+                result = {
+                    'status': 'success',
+                    'token_usage': token_usage,
+                    'data': {'detailed_itinerary': itinerary},
+                }
             yield {'event': 'complete', 'data': result}
 
         except Exception as e:
@@ -551,8 +584,10 @@ class ItenaryRecommendationSystem:
             print("Error while streaming itinerary:", e)
             traceback.print_exc()
             yield {'event': 'error', 'message': str(e)}
+        finally:
+            if _stream_span:
+                _stream_span.__exit__(None, None, None)
 
-    @_lf_observe(name="edit_itinerary", as_type="generation")
     def edit_itinerary(self, user_preferences):
         from prompts import generate_edit_itinerary_prompt
 
@@ -560,78 +595,92 @@ class ItenaryRecommendationSystem:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
 
-            with _lf_propagate(
-                user_id=str(user_preferences.get('_user_id') or ''),
-                session_id=str(user_preferences.get('_session_id') or ''),
-                metadata={
-                    'destination': user_preferences.get('places_of_interest', ''),
-                    'trip_type': user_preferences.get('trip_type', ''),
-                    'trip_duration': user_preferences.get('trip_duration', ''),
-                },
-            ):
-                edit_places = user_preferences.get('places', []) or []
-                place_names = []
-                for p in edit_places:
-                    if isinstance(p, dict):
-                        name = p.get('name') or p.get('placename') or ''
-                    else:
-                        name = str(p)
-                    name = name.strip()
-                    if name and name not in place_names:
-                        place_names.append(name)
+            with lf_span("edit_itinerary", as_type="generation"):
+                with _lf_propagate(
+                    user_id=str(user_preferences.get('_user_id') or ''),
+                    session_id=str(user_preferences.get('_session_id') or ''),
+                    metadata={
+                        'destination': user_preferences.get('places_of_interest', ''),
+                        'trip_type': user_preferences.get('trip_type', ''),
+                        'trip_duration': user_preferences.get('trip_duration', ''),
+                    },
+                ):
+                    edit_places = user_preferences.get('places', []) or []
+                    place_names = []
+                    for p in edit_places:
+                        if isinstance(p, dict):
+                            name = p.get('name') or p.get('placename') or ''
+                        else:
+                            name = str(p)
+                        name = name.strip()
+                        if name and name not in place_names:
+                            place_names.append(name)
 
-                with ThreadPoolExecutor(max_workers=3) as ex:
-                    fut_places = ex.submit(self._get_place_recommendations, user_preferences)
-                    fut_hotels = ex.submit(self._get_hotel_recommendations, user_preferences)
-                    fut_rests  = ex.submit(self._get_restaurant_recommendations, user_preferences)
-                    places                    = fut_places.result()
-                    hotels                    = fut_hotels.result()
-                    restaurants, rest_slots   = fut_rests.result()
-                threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
+                    with lf_span("data_retrieval", input={
+                        'destination': user_preferences.get('places_of_interest', ''),
+                        'trip_type': user_preferences.get('trip_type', ''),
+                        'trip_duration': user_preferences.get('trip_duration', ''),
+                    }):
+                        with ThreadPoolExecutor(max_workers=3) as ex:
+                            fut_places = ex.submit(contextvars.copy_context().run, self._get_place_recommendations, user_preferences)
+                            fut_hotels = ex.submit(contextvars.copy_context().run, self._get_hotel_recommendations, user_preferences)
+                            fut_rests  = ex.submit(contextvars.copy_context().run, self._get_restaurant_recommendations, user_preferences)
+                            places                    = fut_places.result()
+                            hotels                    = fut_hotels.result()
+                            restaurants, rest_slots   = fut_rests.result()
+                        lf_update_span(output={
+                            'places_count': len(places),
+                            'hotels_count': len(hotels),
+                            'restaurants_count': len(restaurants),
+                        })
+                    threading.Thread(target=self._enrich_place_images, args=(places,), daemon=True).start()
 
-                n_places = _llm.places_count_for_trip(user_preferences.get('trip_duration', 3))
-                places_trimmed = _llm.truncate_text_cols(self._trim_for_prompt(places, self._PLACE_COLS_PROMPT, n_places), max_chars=50)
-                hotels_trimmed = self._trim_for_prompt(hotels, self._HOTEL_COLS_PROMPT, 10)
-                rests_trimmed  = _llm.truncate_text_cols(self._trim_for_prompt(restaurants, self._REST_COLS_PROMPT, 15), max_chars=50)
-                messages = generate_edit_itinerary_prompt(
-                    user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names,
-                    rest_slot_counts=rest_slots,
-                )
-                print(f"Edit prompt length: {sum(len(m['content']) for m in messages)} chars")
+                    n_places = _llm.places_count_for_trip(user_preferences.get('trip_duration', 3))
+                    places_trimmed = _llm.truncate_text_cols(self._trim_for_prompt(places, self._PLACE_COLS_PROMPT, n_places), max_chars=50)
+                    hotels_trimmed = self._trim_for_prompt(hotels, self._HOTEL_COLS_PROMPT, 10)
+                    rests_trimmed  = _llm.truncate_text_cols(self._trim_for_prompt(restaurants, self._REST_COLS_PROMPT, 15), max_chars=50)
 
-                response = self.client.responses.create(
-                    model=self.chat_deployment,
-                    input=messages,
-                    max_output_tokens=self.max_tokens,
-                    text={"format": {"type": "json_object"}},
-                )
-                _lf_get_client().update_current_generation(
-                    model=self.chat_deployment,
-                    usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-                    output=response.output_text,
-                )
-                response_text = self._extract_completed_json(response)
-                try:
-                    itinerary = self._parse_itinerary_json(response_text)
-                except ValueError as e:
-                    self._log_json_decode_error(response, response_text, e)
-                    raise
+                    with lf_span("llm_generation"):
+                        messages = generate_edit_itinerary_prompt(
+                            user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names,
+                            rest_slot_counts=rest_slots,
+                        )
+                        print(f"Edit prompt length: {sum(len(m['content']) for m in messages)} chars")
 
-                self._accumulate_usage(itinerary, response)
-                days_received = len(itinerary.get('itinerary') or [])
-                target = user_preferences.get('trip_duration')
-                print(f"[edit_itinerary] received {days_received}/{target} days (tokens used: in={response.usage.input_tokens} out={response.usage.output_tokens})")
+                        response = self.client.responses.create(
+                            model=self.chat_deployment,
+                            input=messages,
+                            max_output_tokens=self.max_tokens,
+                            text={"format": {"type": "json_object"}},
+                        )
+                        _lf_get_client().update_current_generation(
+                            model=self.chat_deployment,
+                            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+                            output=response.output_text,
+                        )
+                        response_text = self._extract_completed_json(response)
+                        try:
+                            itinerary = self._parse_itinerary_json(response_text)
+                        except ValueError as e:
+                            self._log_json_decode_error(response, response_text, e)
+                            raise
 
-                itinerary = self._ensure_full_days(
-                    itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-                    rest_slot_counts=rest_slots,
-                )
+                        self._accumulate_usage(itinerary, response)
+                        days_received = len(itinerary.get('itinerary') or [])
+                        target = user_preferences.get('trip_duration')
+                        print(f"[edit_itinerary] received {days_received}/{target} days (tokens used: in={response.usage.input_tokens} out={response.usage.output_tokens})")
 
-                return self._finalize_itinerary(
-                    itinerary, places,
-                    start_date=user_preferences.get('start_date'),
-                    user_preferences=user_preferences,
-                )
+                        itinerary = self._ensure_full_days(
+                            itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+                            rest_slot_counts=rest_slots,
+                        )
+
+                    with lf_span("finalization"):
+                        return self._finalize_itinerary(
+                            itinerary, places,
+                            start_date=user_preferences.get('start_date'),
+                            user_preferences=user_preferences,
+                        )
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing edit:", e)

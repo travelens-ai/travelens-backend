@@ -11,6 +11,7 @@ from flask import json
 from core.db import fetch_dicts, new_connection, is_db_ready
 from models.recommendation import image_helpers as _img
 from models.recommendation import db_persistence as _dbp
+from models.recommendation.langfuse_helpers import lf_span, lf_update_span
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
@@ -322,15 +323,17 @@ def finalize_trip_level(system, itinerary, places):
     if placename in place_image_map and pd.notna(place_image_map[placename]):
         main_single_image = place_image_map[placename]
 
-    main_images = _img.get_images_for_places(system, [placename]).get(
-        str(placename).strip().lower(), []
-    )
-    if not main_images:
-        main_images = _img.search_images_by_keywords(
-            system, [placename, itinerary.get('city'), itinerary.get('state')], limit=5
+    with lf_span("trip_images", input={"placename": placename, "city": itinerary.get('city')}):
+        main_images = _img.get_images_for_places(system, [placename]).get(
+            str(placename).strip().lower(), []
         )
-    if not main_images and main_single_image:
-        main_images = [main_single_image]
+        if not main_images:
+            main_images = _img.search_images_by_keywords(
+                system, [placename, itinerary.get('city'), itinerary.get('state')], limit=5
+            )
+        if not main_images and main_single_image:
+            main_images = [main_single_image]
+        lf_update_span(output={"images_count": len(main_images)})
     itinerary['images'] = main_images
 
     similar = itinerary.get('similar_places') or []
@@ -381,42 +384,62 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
         for item in day.get('timeline', [])
         if item.get('type') == 'place' and str(item.get('name', '')).strip()
     ]
-    place_images_db = _img.get_images_for_places(system, all_place_names) if all_place_names else {}
-    for day in days:
-        for item in day.get('timeline', []):
-            if item.get('type') != 'place':
-                continue
-            place_name = str(item.get('name', '')).strip()
-            key = place_name.lower()
-            images = place_images_db.get(key, [])[:5]
-            if not images:
-                images = _img.search_images_by_keywords(system, [place_name], limit=5)
-            if not images:
-                single = fallback_map.get(key)
-                if single and not (not isinstance(single, list) and pd.isna(single)):
-                    images = [single]
-            if not images:
-                images = ['default' + str(random.randint(1, 7)) + '.webp']
-            item['images'] = images
+    with lf_span("image_resolution", input={"place_count": len(all_place_names)}):
+        place_images_db = _img.get_images_for_places(system, all_place_names) if all_place_names else {}
+        resolved_count = 0
+        for day in days:
+            for item in day.get('timeline', []):
+                if item.get('type') != 'place':
+                    continue
+                place_name = str(item.get('name', '')).strip()
+                key = place_name.lower()
+                images = place_images_db.get(key, [])[:5]
+                if not images:
+                    images = _img.search_images_by_keywords(system, [place_name], limit=5)
+                if not images:
+                    single = fallback_map.get(key)
+                    if single and not (not isinstance(single, list) and pd.isna(single)):
+                        images = [single]
+                if not images:
+                    images = ['default' + str(random.randint(1, 7)) + '.webp']
+                item['images'] = images
+                if images:
+                    resolved_count += 1
+        lf_update_span(output={"resolved_count": resolved_count})
 
     _sort_timeline_by_time(days)
 
+    city = itinerary.get('city')
     ctx = {
-        'city': itinerary.get('city'),
+        'city': city,
         'state': itinerary.get('state'),
         'itinerary': days,
         'hotels': itinerary.get('hotels', []),
     }
-    attach_lat_long(system, ctx)
-    compute_travel_times(system, ctx)
-    attach_db_fields(system, ctx)
+    with lf_span("lat_lon_travel_times", input={"city": city, "day_count": len(days)}):
+        attach_lat_long(system, ctx)
+        compute_travel_times(system, ctx)
+        attach_db_fields(system, ctx)
+        resolved_ll = sum(
+            1 for day in days
+            for item in day.get('timeline', [])
+            if item.get('lat') is not None
+        )
+        lf_update_span(output={"resolved_lat_lon_count": resolved_ll})
 
     if start_date:
         from datetime import datetime, timedelta
         try:
             base = datetime.strptime(start_date, "%Y-%m-%d").date()
             subset_start = (base + timedelta(days=start_day_index)).strftime("%Y-%m-%d")
-            attach_weather(system, ctx, subset_start)
+            with lf_span("weather_attachment", input={"start_date": subset_start, "city": city}):
+                attach_weather(system, ctx, subset_start)
+                weather_count = sum(
+                    1 for day in days
+                    for item in day.get('timeline', [])
+                    if item.get('weather')
+                )
+                lf_update_span(output={"weather_entries_count": weather_count})
             for idx, day in enumerate(days):
                 day_date = base + timedelta(days=start_day_index + idx)
                 day['date'] = day_date.strftime("%Y-%m-%d")
@@ -432,6 +455,7 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
 
 def finalize_itinerary(system, itinerary, places, start_date=None, user_preferences=None):
     try:
+        import contextvars
         from models.recommendation import recommendations as _rec
         from concurrent.futures import ThreadPoolExecutor as _TPE
         places = finalize_trip_level(system, itinerary, places)
@@ -442,11 +466,11 @@ def finalize_itinerary(system, itinerary, places, start_date=None, user_preferen
         if user_preferences:
             with _TPE(max_workers=2) as ex:
                 fut_days = ex.submit(
-                    finalize_days, system, itinerary, days, places,
+                    contextvars.copy_context().run, finalize_days, system, itinerary, days, places,
                     start_date=start_date, start_day_index=0
                 )
                 fut_avail = ex.submit(
-                    _rec.get_available_places, system, itinerary,
+                    contextvars.copy_context().run, _rec.get_available_places, system, itinerary,
                     user_preferences, 30, scored_df=places
                 )
             itinerary['itinerary'] = fut_days.result()
