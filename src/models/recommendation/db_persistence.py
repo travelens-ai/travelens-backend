@@ -51,14 +51,15 @@ def _save_new_places_to_db(system, cursor, itinerary):
             name = str(item.get('name', '')).strip()
             if name:
                 candidates.append((name, item.get('location', ''), item.get('activities'),
-                                   item.get('lat'), item.get('lon'), item.get('full_address')))
+                                   item.get('lat'), item.get('lon'), item.get('full_address'),
+                                   item.get('rating'), item.get('opening_hours')))
     if not candidates:
         return
 
     cursor.execute("SELECT LOWER(name) FROM places")
     existing = {row[0] for row in cursor.fetchall()}
     inserted, seen = 0, set()
-    for name, location, activities, lat, lon, full_address in candidates:
+    for name, location, activities, lat, lon, full_address, rating, opening_hours in candidates:
         key = name.lower()
         if key in existing or key in seen:
             continue
@@ -68,9 +69,10 @@ def _save_new_places_to_db(system, cursor, itinerary):
             city_id = _resolve_city_id(cursor, city, state)
             famous = ", ".join(activities) if isinstance(activities, list) and activities else None
             cursor.execute(
-                "INSERT INTO places (name, display_name, city_id, famous_activities, lat, lon, full_address) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (key, name, city_id, famous, lat, lon, full_address or None),
+                "INSERT INTO places (name, display_name, city_id, famous_activities, lat, lon, full_address, rating, opening_hours) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (key, name, city_id, famous, lat, lon, full_address or None,
+                 _to_decimal(rating), opening_hours or None),
             )
             inserted += 1
         except Exception as e:
