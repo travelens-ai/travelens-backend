@@ -1,4 +1,5 @@
 import json
+import math
 import uuid
 from decimal import Decimal
 
@@ -9,6 +10,17 @@ from core.images import with_image_urls
 from core.ads import section_ad, get_inline_ads_config
 
 itinerary_bp = Blueprint("itinerary", __name__)
+
+
+def _sanitize_nan(obj):
+    """Recursively replace NaN float values with None so jsonify emits null, not NaN."""
+    if isinstance(obj, float) and math.isnan(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_nan(v) for v in obj]
+    return obj
 
 
 @itinerary_bp.route("/generate-itinerary", methods=["POST"])
@@ -60,7 +72,7 @@ def generate_itinerary():
                 response["itinerary_id"] = cached_id
                 _fix_total_days(response)
                 _inject_itinerary_ads(response)
-            return jsonify(response), 200
+            return jsonify(_sanitize_nan(response)), 200
 
         result = itinerary_service.recommender.generate_itinerary(user_preferences)
         itinerary_id = itinerary_service.store_itinerary(cache_key, user_preferences, result)
@@ -71,7 +83,7 @@ def generate_itinerary():
             _fix_total_days(response)
             _inject_itinerary_ads(response)
 
-        return jsonify(response), 200
+        return jsonify(_sanitize_nan(response)), 200
     except Exception as e:
         print(f"Error generating itinerary: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -245,6 +257,8 @@ def generate_itinerary_stream():
         # such as similar_places).
         if isinstance(o, Decimal):
             return float(o)
+        if isinstance(o, float) and math.isnan(o):
+            return None
         return str(o)
 
     def _sse(payload):
@@ -403,7 +417,7 @@ def edit_itinerary():
             _fix_total_days(response)
             _inject_itinerary_ads(response)
 
-        return jsonify(response), 200
+        return jsonify(_sanitize_nan(response)), 200
     except Exception as e:
         print(f"Error editing itinerary: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -425,7 +439,7 @@ def get_popular_destination():
         return itinerary_service.loading_response()
     try:
         result = itinerary_service.recommender.get_popular_destination()
-        return jsonify(with_image_urls(result)), 200
+        return jsonify(_sanitize_nan(with_image_urls(result))), 200
     except Exception as e:
         print(f"Error fetching popular destinations: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
