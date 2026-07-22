@@ -27,6 +27,7 @@ EXEMPT_PATHS = {
     "/google-login",
     "/health",
     "/",
+    "/configs",
 }
 
 # Path prefixes that never require auth (Swagger UI + spec, static, CORS
