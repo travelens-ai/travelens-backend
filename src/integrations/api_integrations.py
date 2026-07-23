@@ -256,26 +256,36 @@ class GooglePlacesClient:
     def resolve_place_id(self, name: str, city: str) -> str | None:
         """Step 1 — Text Search, IDs Only SKU. Cost: $0.00.
         Returns the resource name (e.g. 'places/ChIJ...') for use in fetch_place_details().
-        Does NOT count against the paid quota."""
+        Does NOT count against the paid quota.
+        Tries name+city first; falls back to name-only if city is too obscure for Google."""
         if not self.api_key:
             return None
-        try:
-            resp = requests.post(
-                self.NEW_PLACES_URL,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Goog-Api-Key": self.api_key,
-                    "X-Goog-FieldMask": _FIELD_MASK_SEARCH,
-                },
-                json={"textQuery": f"{name} {city} India", "maxResultCount": 1},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            places = resp.json().get("places", [])
-            return places[0].get("name") if places else None
-        except Exception as e:
-            print(f"[GooglePlacesClient] resolve_place_id error: {e}")
-            return None
+        import re as _re
+        clean_name = _re.sub(r'\s*\(.*?\)', '', name).strip()
+        queries = [
+            f"{clean_name} {city} India",
+            f"{clean_name} India",
+        ]
+        for query in queries:
+            try:
+                resp = requests.post(
+                    self.NEW_PLACES_URL,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Goog-Api-Key": self.api_key,
+                        "X-Goog-FieldMask": _FIELD_MASK_SEARCH,
+                    },
+                    json={"textQuery": query, "maxResultCount": 1},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                places = resp.json().get("places", [])
+                if places:
+                    return places[0].get("name")
+            except Exception as e:
+                print(f"[GooglePlacesClient] resolve_place_id error ({query}): {e}")
+                return None
+        return None
 
     def fetch_place_details(self, resource_name: str) -> dict | None:
         """Step 2 — Place Details, Enterprise+Atmosphere SKU. Cost: ~$0.025/place.

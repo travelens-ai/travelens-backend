@@ -100,6 +100,10 @@ def resolve_ids_only(cursor, conn, client, batch: int, dry_run: bool):
             skipped += 1
             continue
         bare_id = resource_name.replace("places/", "") if resource_name.startswith("places/") else resource_name
+        if not bare_id.startswith("ChIJ"):
+            print(f"  SKIP  [{place_id}] {name}, {city} — non-standard ID ({bare_id[:30]}...)")
+            skipped += 1
+            continue
         tag = "DRY " if dry_run else ""
         print(f"  {tag}RESOLVE [{place_id}] {name}, {city}  →  {bare_id}")
         if not dry_run:
