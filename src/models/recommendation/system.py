@@ -653,11 +653,12 @@ class ItenaryRecommendationSystem:
                             max_output_tokens=self.max_tokens,
                             text={"format": {"type": "json_object"}},
                         )
-                        _lf_get_client().update_current_generation(
-                            model=self.chat_deployment,
-                            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-                            output=response.output_text,
-                        )
+                        if _LF_AVAILABLE:
+                            _lf_get_client().update_current_generation(
+                                model=self.chat_deployment,
+                                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+                                output=response.output_text,
+                            )
                         response_text = self._extract_completed_json(response)
                         try:
                             itinerary = self._parse_itinerary_json(response_text)

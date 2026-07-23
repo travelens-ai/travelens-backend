@@ -47,112 +47,18 @@ City-transition days: last item = check_out old hotel; first item next day = che
 
 ## meal_options — swappable alternatives per slot (separate from timeline)
 
-Each day has `meal_options` dict with "breakfast", "lunch", "dinner" keys. Each is an array of 2–3 alternatives. Fields: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `reason`. No `travel_from_prev`. All must respect the {tier} tier cap."""
+Each day has `meal_options` dict with "breakfast", "lunch", "dinner" keys. Each is an array of 2–3 alternatives. Fields: `name`, `cuisine`, `approx_cost`, `rating`, `location`, `reason`. No `travel_from_prev`. All must respect the {tier} tier cap.
 
+## Output Format
 
-_SYSTEM = {t: _build_system(t) for t in ('budget', 'mid', 'high', 'luxury')}
-
-
-def generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels, rest_slot_counts=None):
-    trip_duration = user_preferences['trip_duration']
-    _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
-    hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
-    arrival_time = user_preferences.get('arrival_time', '').strip()
-    departure_time = user_preferences.get('departure_time', '').strip()
-
-    arrival_block = ""
-    if arrival_time:
-        arrival_block = f"""
-## ARRIVAL / DEPARTURE — smart planner context
-- User arrives on Day 1 at {arrival_time}. Hotels typically allow check-in at 10–11 AM. Think like a human traveller:
-  - **Very early arrival (before 7 AM):** The traveller is exhausted from an overnight journey. Bag-drop at the hotel on arrival (mark as `event: "check_in"`, note it as bag-drop). They then REST/SLEEP until ~8:00–9:00 AM. Do NOT schedule any activity, place visit, or sightseeing before 8 AM. Do NOT suggest a pre-breakfast activity. After resting, breakfast MUST appear at ~8:30 AM (a `type: "meal", slot: "breakfast"` timeline item). Proper check-in follows at ~10:00–11:00 AM (a second `event: "check_in"` item). Sightseeing starts after proper check-in.
-  - **Morning arrival (7 AM – 10 AM):** Bag-drop at hotel, have breakfast nearby, then explore. Room may be ready by the time they return from the first activity.
-  - **Midday arrival (10 AM – 1 PM):** Check-in properly (room likely ready), freshen up, then head out for lunch + afternoon sightseeing.
-  - **Afternoon arrival (after 1 PM):** Have lunch on the way or near the hotel, check in, then explore in the evening.
-  - First timeline item on Day 1 is always the hotel check_in or bag-drop — travel_from_prev is null.
-"""
-    if departure_time:
-        arrival_block += f"""- User departs on the LAST day at {departure_time}. Work backwards:
-  - Leave 60–90 min buffer for travel to airport/station + 20–30 min packing.
-  - Add hotel check_out before the last sightseeing block.
-  - Never over-schedule the last day — only activities that genuinely fit before departure.
-  - Dinner on the last day: include it only if time genuinely allows before the travel buffer. If not, skip it and add a `note` on the last timeline item: "Heading home — grab a quick bite near the station/airport."
-- Sunrise on Day 2+: if Day 1 arrival blocks a pre-dawn visit, check whether the destination has a world-famous sunrise experience (e.g. Taj Mahal, Varanasi ghats, Jaisalmer fort, Ranthambore). If yes and Day 2 has no early constraint, schedule that sunrise visit on Day 2 before breakfast (~5:00–6:30 AM).
-"""
-
-    caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
-    b_cap, l_cap, d_cap = caps
-    sc = rest_slot_counts or {}
-    n_b, n_l, n_d = sc.get('breakfast', 0), sc.get('lunch', 0), sc.get('dinner', 0)
-    rest_coverage = (
-        f"Dataset coverage for {hotel_pref} tier: "
-        f"breakfast-eligible: {n_b}  |  lunch-eligible: {n_l}  |  dinner-eligible: {n_d}\n"
-        f"- Prefer restaurants with Votes > 100 (more reviews = more reliable rating).\n"
-        f"- Use the `suitable_slots` column to assign each restaurant to the correct meal slot.\n"
-        f"- Cost column is 'cost for two' in INR — a Cost of 400 means ₹200 per person.\n"
-        f"- If a slot has fewer than 3 dataset options, supplement with your own knowledge "
-        f"but still keep costs within ₹{b_cap}/₹{l_cap}/₹{d_cap} per person "
-        f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
-    )
-
-    user_content = f"""## Request context
-- Trip duration: {trip_duration} days — output exactly {trip_duration} day objects (day 1 through day {trip_duration}). `suggested_places` are hints — fit them within the fixed days. Do NOT extend the day count.
-{arrival_block}
-Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Do not stop after day 1.
-
-### User Preferences
-- Preferred activities: {', '.join(user_preferences['preferred_activities'])}
-- Places of interest: {user_preferences['places_of_interest']}
-- Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
-- Food preferences: {user_preferences['food_preferences']}
-- Starting location: {user_preferences['user_location']}
-- Travel month: {user_preferences['current_month']}
-- Trip type: {user_preferences['trip_type']}
-- Trip duration: {trip_duration} days
-- Start date: {user_preferences.get('start_date', 'not specified')}
-- Suggested places: {user_preferences['suggested_places']}
-- Budget: {user_preferences['budget']}
-- Hotel preference tier: {hotel_pref}
-
-### Recommended Places (use first; supplement with your knowledge)
-{top_places.to_csv(index=False)}
-
-### Restaurants Dataset
-{top_restaurants.to_csv(index=False)}
-
-{rest_coverage}
-
-### Hotels Dataset
-{top_hotels.to_csv(index=False)}
-
-### Rules
-
-1. The `itinerary` array must contain exactly {trip_duration} day objects (day 1 through {trip_duration}).
-2. Include all `suggested_places` within {trip_duration} days.
-3. Fill days using the Recommended Places dataset first, then your own knowledge for nearby attractions.
-3b. If destination cannot genuinely fill {trip_duration} days, output all days anyway and set `notes` with a friendly advisory.
-3c. **Distribute places evenly across days.** Do not front-load all top attractions on Day 1 and leave later days thin. Aim for a similar number of place visits per day unless arrival/departure constraints force otherwise.
-4. Each day: as many geographically close places as fit (minimum 2), 3 meal slots, hotel check_in/check_out where appropriate. All in the `timeline` array — NO separate `places_to_visit` or `meals` dict.
-4b. Meal ordering — strictly enforce every day: Breakfast → 1+ place visits → Lunch → 1+ place visits → Dinner. Never place lunch immediately after breakfast or dinner immediately after lunch — always at least 1 place visit between consecutive meals.
-4b-i. Day 1 early/morning arrival EXCEPTION: if arrival_time is before 10:00 AM, breakfast MUST appear as a `type: "meal", slot: "breakfast"` timeline item. For very early arrivals (before 7 AM), breakfast is scheduled at ~8:30 AM (after the traveller has rested) — NOT at 4–5 AM. Place it before the first place visit and before the proper check-in. Do NOT put it only in meal_options.
-4c. Early morning: if destination is known for early morning experiences (sunrise points, ghats, dawn markets), add a pre-breakfast place visit (~5:00–6:30 AM). Breakfast follows at ~7:30–8:00 AM.
-4d. Late night: if destination is famous for night experiences (night markets, beach walks, nightlife), add a post-dinner place visit after dinner.
-5. Do not suggest a place on a day it is regularly closed (use start_date for day-of-week).
-6. Hotels: grouped by city (one group per city for multi-city trips, with correct from_day/to_day). Each group: `selected` (best for "{hotel_pref}" tier) + `alternatives` (1–2 other tiers). Pick from Hotels Dataset; use own knowledge only if a tier has no dataset candidate.
-7. Keep travel flow linear — no A→B→A routing. Order places by opening time; sunset/night spots last.
-8. Set `price_estimated_range` to the actual total per-head estimate for the trip; use the user's budget range if it fits, otherwise show the real range.
-9. Include `similar_places` (2–3 alternative destinations).
-10. No placeholder text ("TBD", "N/A"). Only JSON.
-11. The `itinerary` array MUST have exactly {trip_duration} fully populated day objects. Day 2 through day {trip_duration} follow the exact same structure as day 1 — do not stop early.
-
-### Output Format
+Exact values for `total_days`, `from_day`, `to_day` come from the trip duration in the user message (use that number, not the N below).
 
 {{
   "name": "Destination Name",
   "description": "2–3 sentence overview of the trip",
   "city": "City Name",
   "state": "State Name",
-  "total_days": {trip_duration},
+  "total_days": N,
   "notes": "",
   "price_estimated_range": "₹12,000–₹18,000 per head",
   "similar_places": [
@@ -160,8 +66,8 @@ Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration
   ],
   "hotels": [
     {{
-      "city": "City Name", "from_day": 1, "to_day": {trip_duration},
-      "selected": {{"name": "Best Hotel", "type": "{hotel_pref}", "price_range": "₹X–₹Y/night", "rating": "4.3", "location": "City, State", "reason": "Best match for your tier", "link": "https://..."}},
+      "city": "City Name", "from_day": 1, "to_day": N,
+      "selected": {{"name": "Best Hotel", "type": "{tier}", "price_range": "₹X–₹Y/night", "rating": "4.3", "location": "City, State", "reason": "Best match for your tier", "link": "https://..."}},
       "alternatives": [
         {{"name": "Budget Option", "type": "budget", "price_range": "₹800–₹1,500/night", "rating": "4.0", "location": "City, State", "reason": "Affordable, central", "link": "https://..."}},
         {{"name": "Luxury Option", "type": "luxury", "price_range": "₹12,000+/night", "rating": "4.8", "location": "City, State", "reason": "Premium experience", "link": "https://..."}}
@@ -211,6 +117,106 @@ Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration
     }}
   ]
 }}
+
+## Restaurant Dataset Notes
+- Prefer restaurants with Votes > 100 (more reviews = more reliable rating).
+- Use the `suitable_slots` column to assign each restaurant to the correct meal slot.
+- Cost column is 'cost for two' in INR — a Cost of 400 means ₹200 per person.
+- If a slot has fewer than 3 dataset options, supplement with your own knowledge but still keep costs within the {tier} tier caps above."""
+
+
+_SYSTEM = {t: _build_system(t) for t in ('budget', 'mid', 'high', 'luxury')}
+
+
+def generate_travel_itinerary_prompt(user_preferences, top_places, top_restaurants, top_hotels, rest_slot_counts=None):
+    trip_duration = user_preferences['trip_duration']
+    _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
+    hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
+    arrival_time = user_preferences.get('arrival_time', '').strip()
+    departure_time = user_preferences.get('departure_time', '').strip()
+
+    arrival_block = ""
+    if arrival_time:
+        arrival_block = f"""
+## ARRIVAL / DEPARTURE — smart planner context
+- User arrives on Day 1 at {arrival_time}. Hotels typically allow check-in at 10–11 AM. Think like a human traveller:
+  - **Very early arrival (before 7 AM):** The traveller is exhausted from an overnight journey. Bag-drop at the hotel on arrival (mark as `event: "check_in"`, note it as bag-drop). They then REST/SLEEP until ~8:00–9:00 AM. Do NOT schedule any activity, place visit, or sightseeing before 8 AM. Do NOT suggest a pre-breakfast activity. After resting, breakfast MUST appear at ~8:30 AM (a `type: "meal", slot: "breakfast"` timeline item). Proper check-in follows at ~10:00–11:00 AM (a second `event: "check_in"` item). Sightseeing starts after proper check-in.
+  - **Morning arrival (7 AM – 10 AM):** Bag-drop at hotel, have breakfast nearby, then explore. Room may be ready by the time they return from the first activity.
+  - **Midday arrival (10 AM – 1 PM):** Check-in properly (room likely ready), freshen up, then head out for lunch + afternoon sightseeing.
+  - **Afternoon arrival (after 1 PM):** Have lunch on the way or near the hotel, check in, then explore in the evening.
+  - First timeline item on Day 1 is always the hotel check_in or bag-drop — travel_from_prev is null.
+"""
+    if departure_time:
+        arrival_block += f"""- User departs on the LAST day at {departure_time}. Work backwards:
+  - Leave 60–90 min buffer for travel to airport/station + 20–30 min packing.
+  - Add hotel check_out before the last sightseeing block.
+  - Never over-schedule the last day — only activities that genuinely fit before departure.
+  - Dinner on the last day: include it only if time genuinely allows before the travel buffer. If not, skip it and add a `note` on the last timeline item: "Heading home — grab a quick bite near the station/airport."
+- Sunrise on Day 2+: if Day 1 arrival blocks a pre-dawn visit, check whether the destination has a world-famous sunrise experience (e.g. Taj Mahal, Varanasi ghats, Jaisalmer fort, Ranthambore). If yes and Day 2 has no early constraint, schedule that sunrise visit on Day 2 before breakfast (~5:00–6:30 AM).
+"""
+
+    caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
+    b_cap, l_cap, d_cap = caps
+    sc = rest_slot_counts or {}
+    n_b, n_l, n_d = sc.get('breakfast', 0), sc.get('lunch', 0), sc.get('dinner', 0)
+    rest_coverage = (
+        f"Dataset coverage for {hotel_pref} tier: "
+        f"breakfast-eligible: {n_b}  |  lunch-eligible: {n_l}  |  dinner-eligible: {n_d}\n"
+        f"- If a slot has fewer than 3 dataset options, supplement with your own knowledge "
+        f"but still keep costs within ₹{b_cap}/₹{l_cap}/₹{d_cap} per person "
+        f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
+    )
+
+    user_content = f"""## Request context
+- Trip duration: {trip_duration} days — output exactly {trip_duration} day objects (day 1 through day {trip_duration}). `suggested_places` are hints — fit them within the fixed days. Do NOT extend the day count.
+{arrival_block}
+Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Do not stop after day 1.
+
+### User Preferences
+- Preferred activities: {', '.join(user_preferences['preferred_activities'])}
+- Places of interest: {user_preferences['places_of_interest']}
+- Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
+- Food preferences: {user_preferences['food_preferences']}
+- Starting location: {user_preferences['user_location']}
+- Travel month: {user_preferences['current_month']}
+- Trip type: {user_preferences['trip_type']}
+- Trip duration: {trip_duration} days
+- Start date: {user_preferences.get('start_date', 'not specified')}
+- Suggested places: {user_preferences['suggested_places']}
+- Budget: {user_preferences['budget']}
+- Hotel preference tier: {hotel_pref}
+
+### Recommended Places (use first; supplement with your knowledge)
+{top_places.to_csv(index=False, na_rep='null')}
+
+### Restaurants Dataset
+{top_restaurants.to_csv(index=False, na_rep='null')}
+
+{rest_coverage}
+
+### Hotels Dataset
+{top_hotels.to_csv(index=False, na_rep='null')}
+
+### Rules
+
+1. The `itinerary` array must contain exactly {trip_duration} day objects (day 1 through {trip_duration}).
+2. Include all `suggested_places` within {trip_duration} days.
+3. Fill days using the Recommended Places dataset first, then your own knowledge for nearby attractions.
+3b. If destination cannot genuinely fill {trip_duration} days, output all days anyway and set `notes` with a friendly advisory.
+3c. **Distribute places evenly across days.** Do not front-load all top attractions on Day 1 and leave later days thin. Aim for a similar number of place visits per day unless arrival/departure constraints force otherwise.
+4. Each day: as many geographically close places as fit (minimum 2), 3 meal slots, hotel check_in/check_out where appropriate. All in the `timeline` array — NO separate `places_to_visit` or `meals` dict.
+4b. Meal ordering — strictly enforce every day: Breakfast → 1+ place visits → Lunch → 1+ place visits → Dinner. Never place lunch immediately after breakfast or dinner immediately after lunch — always at least 1 place visit between consecutive meals.
+4b-i. Day 1 early/morning arrival EXCEPTION: if arrival_time is before 10:00 AM, breakfast MUST appear as a `type: "meal", slot: "breakfast"` timeline item. For very early arrivals (before 7 AM), breakfast is scheduled at ~8:30 AM (after the traveller has rested) — NOT at 4–5 AM. Place it before the first place visit and before the proper check-in. Do NOT put it only in meal_options.
+4c. Early morning: if destination is known for early morning experiences (sunrise points, ghats, dawn markets), add a pre-breakfast place visit (~5:00–6:30 AM). Breakfast follows at ~7:30–8:00 AM.
+4d. Late night: if destination is famous for night experiences (night markets, beach walks, nightlife), add a post-dinner place visit after dinner.
+5. Do not suggest a place on a day it is regularly closed (use start_date for day-of-week).
+6. Hotels: grouped by city (one group per city for multi-city trips, with correct from_day/to_day). Each group: `selected` (best for "{hotel_pref}" tier) + `alternatives` (1–2 other tiers). Pick from Hotels Dataset; use own knowledge only if a tier has no dataset candidate.
+7. Keep travel flow linear — no A→B→A routing. Order places by opening time; sunset/night spots last.
+8. Set `price_estimated_range` to the actual total per-head estimate for the trip; use the user's budget range if it fits, otherwise show the real range.
+9. Include `similar_places` (2–3 alternative destinations).
+10. No placeholder text ("TBD", "N/A"). Only JSON.
+11. The `itinerary` array MUST have exactly {trip_duration} fully populated day objects. Day 2 through day {trip_duration} follow the exact same structure as day 1 — do not stop early.
+
 """
 
     user_content += (

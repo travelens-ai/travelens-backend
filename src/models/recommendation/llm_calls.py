@@ -251,11 +251,12 @@ def generate_trip_skeleton(system, user_preferences, top_places, top_restaurants
             reasoning={"effort": "low"},
             text={"format": {"type": "json_object"}},
         )
-        _lf_get_client().update_current_generation(
-            model=system.chat_deployment,
-            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-            output=response.output_text,
-        )
+        if _LF_AVAILABLE:
+            _lf_get_client().update_current_generation(
+                model=system.chat_deployment,
+                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+                output=response.output_text,
+            )
         response_text = extract_completed_json(response)
         skeleton = None
         for raw in find_json_objects(response_text):
@@ -301,11 +302,12 @@ def generate_detailed_itinerary(system, user_preferences, top_places, top_hotels
             reasoning={"effort": "low"},
             text={"format": {"type": "json_object"}},
         )
-        _lf_get_client().update_current_generation(
-            model=system.chat_deployment,
-            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-            output=response.output_text,
-        )
+        if _LF_AVAILABLE:
+            _lf_get_client().update_current_generation(
+                model=system.chat_deployment,
+                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+                output=response.output_text,
+            )
         response_text = extract_completed_json(response)
         try:
             itinerary = parse_itinerary_json(response_text)
@@ -372,9 +374,10 @@ def generate_extra_days(system, user_preferences, top_places, top_restaurants, t
             rest_slot_counts=rest_slot_counts,
         )
         print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
-        _lf_get_client().update_current_span(
-            metadata={"start_day": start_day, "num_days": num_days},
-        )
+        if _LF_AVAILABLE:
+            _lf_get_client().update_current_span(
+                metadata={"start_day": start_day, "num_days": num_days},
+            )
         max_tok = getattr(system, 'max_tokens_day', system.max_tokens) * max(1, num_days)
         response = system.client.responses.create(
             model=system.chat_deployment,
@@ -383,11 +386,12 @@ def generate_extra_days(system, user_preferences, top_places, top_restaurants, t
             reasoning={"effort": "low"},
             text={"format": {"type": "json_object"}},
         )
-        _lf_get_client().update_current_generation(
-            model=system.chat_deployment,
-            usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-            output=response.output_text,
-        )
+        if _LF_AVAILABLE:
+            _lf_get_client().update_current_generation(
+                model=system.chat_deployment,
+                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens},
+                output=response.output_text,
+            )
         if itinerary is not None:
             accumulate_usage(itinerary, response)
         response_text = extract_completed_json(response)
@@ -416,12 +420,13 @@ def generate_destination_description(system, destination):
                 reasoning={"effort": "low"},
             )
             result = (response.output_text or "").strip()
-            _lf_get_client().update_current_generation(
-                model=system.chat_deployment,
-                input=user_prompt,
-                output=result,
-                usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens} if response.usage else None,
-            )
+            if _LF_AVAILABLE:
+                _lf_get_client().update_current_generation(
+                    model=system.chat_deployment,
+                    input=user_prompt,
+                    output=result,
+                    usage_details={"input": response.usage.input_tokens, "output": response.usage.output_tokens} if response.usage else None,
+                )
             return result
         except Exception as e:
             print(f"  _generate_destination_description failed for {destination!r}: {e}")

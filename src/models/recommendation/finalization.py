@@ -150,8 +150,10 @@ def attach_db_fields(system, itinerary):
                 item["good_for_children"] = db["good_for_children"]
             if db.get("accessibility"):
                 item["accessibility"] = db["accessibility"]
-            item["editorial_summary"] = db.get("editorial_summary") or ""
-            item["review_summary"] = db.get("review_summary") or ""
+            if db.get("editorial_summary"):
+                item["editorial_summary"] = db["editorial_summary"]
+            if db.get("review_summary"):
+                item["review_summary"] = db["review_summary"]
             item["short_formatted_address"] = db.get("short_formatted_address") or ""
             item["google_rating"] = db.get("google_rating")
             item["google_rating_count"] = db.get("google_rating_count")
@@ -418,7 +420,6 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
     }
     with lf_span("lat_lon_travel_times", input={"city": city, "day_count": len(days)}):
         attach_lat_long(system, ctx)
-        compute_travel_times(system, ctx)
         attach_db_fields(system, ctx)
         resolved_ll = sum(
             1 for day in days
