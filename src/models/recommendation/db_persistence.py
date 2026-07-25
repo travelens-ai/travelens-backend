@@ -184,8 +184,10 @@ def _fetch_and_link_images(place_rows: list):
     if not place_rows:
         return
     print(f"[image_fetch] fetching images for {len(place_rows)} new place(s)")
-    for place_id, display_name, city, state in place_rows:
-        query = f"{display_name} {city} {state} India".strip()
+    for row in place_rows:
+        place_id, display_name, city, state = row[0], row[1], row[2], row[3]
+        country = row[4] if len(row) > 4 else 'India'
+        query = f"{display_name} {city} {state} {country}".strip()
         base = re.sub(r"[^\w\-]", "_",
                       "_".join(p for p in [display_name, city, state] if p).replace(" ", "_"))
         print(f"[image_fetch] {display_name} ({city}, {state})")
@@ -213,8 +215,11 @@ def _fetch_and_link_images(place_rows: list):
         print(f"[image_fetch] {display_name}: {uploaded} image(s) linked")
 
 
-def save_new_places(system, itinerary):
-    """Persist new entities from the itinerary to the DB (background thread)."""
+def save_new_places(system, itinerary, country=None):
+    """Persist new entities from the itinerary to the DB (background thread).
+
+    country: hint used when auto-creating states/cities for international destinations.
+    """
     try:
         conn = new_connection()
         cursor = conn.cursor()
@@ -224,7 +229,7 @@ def save_new_places(system, itinerary):
 
     new_place_rows = []
     try:
-        new_place_rows = _save_new_places_to_db(system, cursor, itinerary)
+        new_place_rows = _save_new_places_to_db(system, cursor, itinerary, country=country)
         _save_new_hotels_to_db(system, cursor, itinerary)
         _save_new_restaurants_to_db(system, cursor, itinerary)
         conn.commit()
@@ -237,6 +242,25 @@ def save_new_places(system, itinerary):
         conn.close()
 
     _fetch_and_link_images(new_place_rows)
+
+
+_CITY_NOISE_WORDS = frozenset({
+    'between', 'near', 'along', 'towards', 'from', 'behind', 'above',
+    'below', 'inside', 'outside', 'opposite', 'beyond', 'within', 'off',
+    'via', 'on', 'at', 'the', 'and', 'to', 'of', 'by', 'en',
+})
+
+
+def _is_valid_city(city_name):
+    """Return False if city_name looks like a descriptive phrase rather than a real city name."""
+    if not city_name:
+        return False
+    words = city_name.strip().split()
+    if len(words) > 4:
+        return False
+    if any(w.lower() in _CITY_NOISE_WORDS for w in words):
+        return False
+    return True
 
 
 def _parse_city_state(location):
@@ -257,7 +281,7 @@ def _to_decimal(value):
     return float(m.group()) if m else None
 
 
-def _save_new_places_to_db(system, cursor, itinerary):
+def _save_new_places_to_db(system, cursor, itinerary, country=None):
     candidates = []
     for day in itinerary.get('itinerary', []):
         for item in day.get('timeline', []):
@@ -281,7 +305,9 @@ def _save_new_places_to_db(system, cursor, itinerary):
         seen.add(key)
         try:
             city, state = _parse_city_state(location)
-            city_id = _resolve_city_id(cursor, city, state)
+            if not _is_valid_city(city):
+                city = None  # bad phrase — save place with city_id=NULL, no junk city row
+            city_id = _resolve_city_id(cursor, city, state, country=country)
             famous = ", ".join(activities) if isinstance(activities, list) and activities else None
             cursor.execute(
                 "INSERT INTO places (name, display_name, city_id, famous_activities, lat, lon, full_address, rating, opening_hours) "
@@ -293,7 +319,7 @@ def _save_new_places_to_db(system, cursor, itinerary):
             row = cursor.fetchone()
             if row:
                 place_id = int(row[0])
-                inserted_rows.append((place_id, name, city or "", state or ""))
+                inserted_rows.append((place_id, name, city or "", state or "", country or ""))
         except Exception as e:
             print(f"[save_new_places] failed to insert place '{name}': {e}")
     print(f"[save_new_places] inserted {len(inserted_rows)} new place(s).")
@@ -381,19 +407,77 @@ def _save_new_restaurants_to_db(system, cursor, itinerary):
     print(f"[save_new_places] inserted {inserted} new restaurant(s).")
 
 
-def _resolve_city_id(cursor, city, state):
+def _upsert_country_state(cursor, state, country):
+    """Upsert country + state rows for international destinations.
+    Returns state_id, or None if both state and country are blank."""
+    if not country:
+        return None
+    cursor.execute("SELECT id FROM country WHERE LOWER(name) = LOWER(?)", (country,))
+    crow = cursor.fetchone()
+    if crow:
+        country_id = crow[0]
+    else:
+        cursor.execute(
+            "INSERT INTO country (name) OUTPUT INSERTED.id VALUES (?)", (country.title(),)
+        )
+        country_id = int(cursor.fetchone()[0])
+        print(f"[save_new_places] created country '{country.title()}'")
+
+    # Use state name if available; fall back to country name as a catch-all state.
+    state_name = (state or country).title()
+    cursor.execute(
+        "SELECT id FROM states WHERE LOWER(name) = LOWER(?) AND country_id = ?",
+        (state_name, country_id),
+    )
+    srow = cursor.fetchone()
+    if srow:
+        return srow[0]
+    cursor.execute(
+        "INSERT INTO states (name, country_id) OUTPUT INSERTED.id VALUES (?, ?)",
+        (state_name, country_id),
+    )
+    state_id = int(cursor.fetchone()[0])
+    print(f"[save_new_places] created state '{state_name}' under country_id={country_id}")
+    return state_id
+
+
+def _resolve_city_id(cursor, city, state, country=None):
     if not city:
         return None
-    cursor.execute("SELECT id FROM cities WHERE name = ?", (city,))
+
+    cursor.execute("SELECT id, state_id FROM cities WHERE LOWER(name) = LOWER(?)", (city,))
     row = cursor.fetchone()
+
     if row:
-        return row[0]
+        city_id, existing_state_id = row[0], row[1]
+        # City exists but has no state link — try to fill it in now.
+        if existing_state_id is None and country:
+            new_state_id = None
+            if state:
+                cursor.execute("SELECT id FROM states WHERE LOWER(name) = LOWER(?)", (state.lower(),))
+                srow = cursor.fetchone()
+                new_state_id = srow[0] if srow else _upsert_country_state(cursor, state, country)
+            else:
+                new_state_id = _upsert_country_state(cursor, None, country)
+            if new_state_id is not None:
+                cursor.execute(
+                    "UPDATE cities SET state_id = ? WHERE id = ?", (new_state_id, city_id)
+                )
+        return city_id
+
+    # City does not exist — resolve state first, then insert.
     state_id = None
     if state:
-        cursor.execute("SELECT id FROM states WHERE LOWER(name) = ?", (state.lower(),))
+        cursor.execute("SELECT id FROM states WHERE LOWER(name) = LOWER(?)", (state.lower(),))
         srow = cursor.fetchone()
         if srow:
             state_id = srow[0]
+        elif country:
+            state_id = _upsert_country_state(cursor, state, country)
+    elif country:
+        # No state in location string — use country as the catch-all state.
+        state_id = _upsert_country_state(cursor, None, country)
+
     cursor.execute(
         "INSERT INTO cities (name, state_id) OUTPUT INSERTED.id VALUES (?, ?)", (city, state_id)
     )

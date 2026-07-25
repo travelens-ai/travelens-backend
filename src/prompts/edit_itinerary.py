@@ -1,4 +1,35 @@
+import re as _re
 from prompts.constants import BUDGET_TIER_MAP, MEAL_COST_CAPS, MEAL_TIER_TABLE
+
+
+def _parse_hour(time_str: str):
+    s = (time_str or '').strip().upper()
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    if not m:
+        return None
+    h = int(m.group(1))
+    if m.group(3) == 'PM' and h != 12:
+        h += 12
+    elif m.group(3) == 'AM' and h == 12:
+        h = 0
+    return h if 0 <= h <= 23 else None
+
+
+def _parse_minute(time_str: str) -> int:
+    s = (time_str or '').strip().upper()
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    return int(m.group(2)) if m and m.group(2) else 0
+
+
+def _checkout_deadline(dep_hour: int, dep_minute: int = 0, buffer_mins: int = 90) -> str:
+    total = dep_hour * 60 + dep_minute - buffer_mins
+    if total < 0:
+        total = 0
+    h, mn = divmod(total, 60)
+    suffix = "AM" if h < 12 else "PM"
+    display_h = h if 1 <= h <= 12 else (12 if h == 0 else h - 12)
+    return f"{display_h}:{mn:02d} {suffix}"
+
 
 # Pre-computed at import time — one static string per tier.
 # Keeps the system prefix identical across all requests on the same tier,
@@ -130,12 +161,95 @@ def generate_edit_itinerary_prompt(user_preferences, top_places, top_restaurants
     hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
     arrival_time = user_preferences.get('arrival_time', '').strip()
     departure_time = user_preferences.get('departure_time', '').strip()
+    arr_hour = _parse_hour(arrival_time)
+    dep_hour = _parse_hour(departure_time)
+    dep_minute = _parse_minute(departure_time) if departure_time else 0
 
     arrival_block = ""
     if arrival_time:
-        arrival_block += f"- User arrives on Day 1 at {arrival_time}. Reason like a smart planner: bag-drop before check-in, sunrise spot if arriving early, lunch on the way if arriving at 2pm.\n"
-    if departure_time:
-        arrival_block += f"- User departs on the last day at {departure_time}. Work backwards: 60–90 min buffer for transport + 20–30 min packing. Include hotel check_out item. Don't over-schedule.\n"
+        if arr_hour is not None and arr_hour >= 10:
+            if arr_hour >= 20:
+                arrival_block += (
+                    f"**Day 1 late-night arrival at {arrival_time} — overrides Rule 4b for Day 1 only:** "
+                    f"Do NOT add breakfast, lunch, or any place/activity to Day 1 timeline. "
+                    f"Omit breakfast and lunch from `meal_options` for Day 1 — only 'dinner' key allowed. "
+                    f"Day 1 only: hotel check_in at {arrival_time} (first item, travel_from_prev: null), then optionally a quick dinner. "
+                    f"No sightseeing or place visits on Day 1.\n"
+                )
+            elif arr_hour >= 14:
+                skip, first = "breakfast and lunch", "dinner"
+                arrival_block += (
+                    f"**Day 1 arrival at {arrival_time} — overrides Rule 4b for Day 1 only:** "
+                    f"Do NOT add {skip} to the Day 1 timeline or `meal_options`. "
+                    f"First meal on Day 1 is {first}. "
+                    f"First timeline item: hotel check_in at {arrival_time} (travel_from_prev: null). "
+                    f"No activities scheduled before {arrival_time}.\n"
+                )
+            else:
+                skip, first = "breakfast", "lunch"
+                arrival_block += (
+                    f"**Day 1 arrival at {arrival_time} — overrides Rule 4b for Day 1 only:** "
+                    f"Do NOT add {skip} to the Day 1 timeline or `meal_options`. "
+                    f"First meal on Day 1 is {first}. "
+                    f"First timeline item: hotel check_in at {arrival_time} (travel_from_prev: null). "
+                    f"No activities scheduled before {arrival_time}.\n"
+                )
+        elif arr_hour is not None and arr_hour < 7:
+            arrival_block += (
+                f"**Day 1 very early arrival at {arrival_time}:** "
+                f"Bag-drop at hotel on arrival (check_in, note as bag-drop). REST until ~8:00–9:00 AM. "
+                f"Breakfast at ~8:30 AM (timeline item). Proper check-in at ~10:00–11:00 AM (second check_in). "
+                f"First timeline item: hotel check_in at {arrival_time}, travel_from_prev: null.\n"
+            )
+        else:
+            arrival_block += (
+                f"**Day 1 morning arrival at {arrival_time}:** "
+                f"Bag-drop at hotel, breakfast nearby, then explore. "
+                f"First timeline item: hotel check_in at {arrival_time}, travel_from_prev: null.\n"
+            )
+    if departure_time and dep_hour is not None:
+        latest_co = _checkout_deadline(dep_hour, dep_minute)
+        if dep_hour < 9:
+            arrival_block += (
+                f"**Last day early departure at {departure_time} — hard rules:** "
+                f"Do NOT add any place visits, meals, or activities on the last day. "
+                f"The ONLY item on the last day is hotel check_out — it MUST be by {latest_co}. "
+                f"Note on the check_out item: 'Early departure — grab something at the airport/station.'\n"
+            )
+        elif dep_hour < 12:
+            arrival_block += (
+                f"**Last day departure at {departure_time} — hard rules:** "
+                f"Skip lunch and dinner from the last-day timeline. "
+                f"Hotel check_out MUST be by {latest_co}. "
+                f"The check_out object is the LAST element in the last day's `timeline` array. "
+                f"After writing check_out, close the timeline array immediately: `...check_out item` ]. "
+                f"Do NOT write any place, meal, or activity JSON object after check_out. "
+                f"Last day order: breakfast → at most 1 short activity → check_out (array ends). "
+                f"Note on the check_out item: 'Heading home after a quick morning.'\n"
+            )
+        elif dep_hour < 15:
+            arrival_block += (
+                f"**Last day departure at {departure_time} — hard rules:** "
+                f"Skip dinner from the last-day timeline. "
+                f"Hotel check_out MUST be by {latest_co}. "
+                f"The check_out object is the LAST element in the last day's `timeline` array. "
+                f"After writing check_out, close the timeline array immediately: `...check_out item` ]. "
+                f"Do NOT write any place, meal, or activity JSON object after check_out. "
+                f"Note on the check_out item: 'Heading home — grab a quick bite near the station/airport.'\n"
+            )
+        else:
+            arrival_block += (
+                f"**Last day departure at {departure_time} — hard rules:** "
+                f"Hotel check_out MUST be by {latest_co}. Do NOT schedule any activity or meal ending after {latest_co}. "
+                f"hotel check_out is the LAST hotel item — nothing scheduled after the departure buffer. "
+                f"Include dinner only if it genuinely ends before {latest_co}. "
+                f"Note on last timeline item if dinner is skipped: 'Heading home — grab a quick bite near the station/airport.'\n"
+            )
+    elif departure_time:
+        arrival_block += (
+            f"**Last day departure at {departure_time}:** "
+            f"Add hotel check_out, don't over-schedule the last day.\n"
+        )
     arrival_section = ("## Arrival / Departure\n" + arrival_block) if arrival_block else ""
 
     caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
