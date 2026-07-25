@@ -29,6 +29,8 @@ from features.user import user_bp
 from features.weather import weather_bp
 from features.search import search_bp
 from features.config import config_bp
+from features.feedback import feedback_bp
+from features.messaging import messaging_bp
 
 app = Flask(__name__)
 CORS(app)
@@ -71,6 +73,8 @@ app.register_blueprint(user_bp)
 app.register_blueprint(weather_bp)
 app.register_blueprint(search_bp)
 app.register_blueprint(config_bp)
+app.register_blueprint(feedback_bp)
+app.register_blueprint(messaging_bp)
 
 init_db_async()
 initialize_recommender()
