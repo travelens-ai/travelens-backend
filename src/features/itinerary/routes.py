@@ -1,6 +1,7 @@
 import json
 import math
 import uuid
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 from flask import Blueprint, request, jsonify, Response, stream_with_context
@@ -10,6 +11,29 @@ from core.images import with_image_urls
 from core.ads import section_ad, get_inline_ads_config
 
 itinerary_bp = Blueprint("itinerary", __name__)
+
+_IST = timedelta(hours=5, minutes=30)
+
+
+def _resolve_arrival_departure(prefs):
+    """Populate arrival_time / departure_time from *_datetime if absent.
+
+    The frontend sends UTC ISO strings (arrival_datetime, departure_datetime).
+    The prompt builder expects 24-h 'HH:MM' strings in local (IST) time.
+    """
+    for dt_key, time_key in (('arrival_datetime', 'arrival_time'),
+                              ('departure_datetime', 'departure_time')):
+        if prefs.get(time_key):
+            continue
+        raw = prefs.get(dt_key)
+        if not raw:
+            continue
+        try:
+            dt_utc = datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+            dt_ist = dt_utc.astimezone(timezone(_IST))
+            prefs[time_key] = dt_ist.strftime('%H:%M')
+        except (ValueError, TypeError):
+            pass
 
 
 def _sanitize_nan(obj):
@@ -63,6 +87,7 @@ def generate_itinerary():
         user_preferences = dict(request.json or {})
         user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
         user_preferences['_session_id'] = str(uuid.uuid4())
+        _resolve_arrival_departure(user_preferences)
         cache_key = json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
         cached_result, cached_id = itinerary_service.get_cached_itinerary(cache_key)
@@ -248,6 +273,7 @@ def generate_itinerary_stream():
     user_preferences = dict(request.json or {})
     user_preferences['_user_id'] = getattr(request, 'user_id', None) or getattr(request, 'device_id', None)
     user_preferences['_session_id'] = str(uuid.uuid4())
+    _resolve_arrival_departure(user_preferences)
     cache_key = json.dumps({k: v for k, v in user_preferences.items() if not k.startswith('_')}, sort_keys=True)
 
     def _json_default(o):
