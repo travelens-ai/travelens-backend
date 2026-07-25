@@ -92,6 +92,7 @@ def generate_extra_days_prompt(user_preferences, top_places, top_restaurants, to
 
     user_content = f"""## Request context
 - Budget tier: {hotel_pref}
+- **DESTINATION LOCK:** The destination is "{user_preferences['places_of_interest']}". Generate all places and restaurants for THIS destination only. Do NOT substitute or default to any other city.
 {arrival_block}
 Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} through {start_day + num_days - 1}. Do not stop early.
 

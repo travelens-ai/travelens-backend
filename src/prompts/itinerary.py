@@ -169,6 +169,7 @@ def generate_travel_itinerary_prompt(user_preferences, top_places, top_restauran
 
     user_content = f"""## Request context
 - Trip duration: {trip_duration} days — output exactly {trip_duration} day objects (day 1 through day {trip_duration}). `suggested_places` are hints — fit them within the fixed days. Do NOT extend the day count.
+- **DESTINATION LOCK — CRITICAL:** The destination is "{user_preferences['places_of_interest']}". Your `city` and `state` fields in the JSON output MUST reflect this destination. Do NOT substitute, replace, or default to any other city or destination — even if the Recommended Places dataset below is empty. If the dataset is empty, use your own knowledge about "{user_preferences['places_of_interest']}" exclusively.
 {arrival_block}
 Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Do not stop after day 1.
 
@@ -199,6 +200,7 @@ Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration
 
 ### Rules
 
+0. **DESTINATION IS FIXED:** Generate the itinerary for "{user_preferences['places_of_interest']}" and only that destination. Never change, substitute, or default to another city. The `city` and `state` in the output JSON must reflect "{user_preferences['places_of_interest']}" — not Goa, not Mumbai, not any other city.
 1. The `itinerary` array must contain exactly {trip_duration} day objects (day 1 through {trip_duration}).
 2. Include all `suggested_places` within {trip_duration} days.
 3. Fill days using the Recommended Places dataset first, then your own knowledge for nearby attractions.

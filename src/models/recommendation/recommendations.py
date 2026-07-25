@@ -107,21 +107,8 @@ def get_hotel_recommendations(system, user_preferences):
             lf_update_span(output={"count": len(result), "source": "db"})
             return result
 
-        # 2. SQLite cache (previously fetched Google Places results)
-        cached = system.places_client.get_cached_hotels(city)
-        if cached:
-            result = pd.DataFrame(cached).head(100)
-            lf_update_span(output={"count": len(result), "source": "cache"})
-            return result
-
-        # 3. Live Google Places API
-        live_hotels = system.places_client.search_hotels(city)
-        if live_hotels:
-            result = pd.DataFrame(live_hotels).head(100)
-            lf_update_span(output={"count": len(result), "source": "api"})
-            return result
-
-        lf_update_span(output={"count": 0, "source": "empty"})
+        # No DB data — pass empty DataFrame; LLM will generate hotels from its knowledge
+        lf_update_span(output={"count": 0, "source": "empty/llm"})
         return top_hotels.head(100)
 
 
@@ -189,17 +176,8 @@ def get_restaurant_recommendations(system, user_preferences):
         if not top_restaurants.empty:
             return _return(_annotate_and_count(top_restaurants.head(100)), "db")
 
-        # 2. SQLite cache (previously fetched Google Places results)
-        cached = system.places_client.get_cached_restaurants(city, cuisine)
-        if cached:
-            return _return(_annotate_and_count(pd.DataFrame(cached).head(100)), "cache")
-
-        # 3. Live Google Places API
-        live_restaurants = system.places_client.search_restaurants(city, cuisine)
-        if live_restaurants:
-            return _return(_annotate_and_count(pd.DataFrame(live_restaurants).head(100)), "api")
-
-        return _return(_annotate_and_count(top_restaurants.head(100)), "empty")
+        # No DB data — pass empty DataFrame; LLM will generate restaurants from its knowledge
+        return _return(_annotate_and_count(top_restaurants.head(100)), "empty/llm")
 
 
 def get_available_places(system, itinerary, user_preferences, count, scored_df=None):

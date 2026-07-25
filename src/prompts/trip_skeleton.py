@@ -34,6 +34,8 @@ def generate_trip_skeleton_prompt(user_preferences, top_places, top_restaurants,
 
     user_content = f"""Create the trip-level summary for this trip.
 
+**DESTINATION LOCK:** The destination is "{user_preferences['places_of_interest']}". Your `city` and `state` fields MUST reflect this destination. Do NOT substitute or default to any other city — even if the Hotels Dataset below is empty.
+
 ## User Preferences
 - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
 - Places of interest: {user_preferences['places_of_interest']}

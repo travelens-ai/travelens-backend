@@ -1,4 +1,5 @@
 import json
+import re
 
 from core.db import get_connection
 from core.images import with_image_urls
@@ -60,7 +61,8 @@ def get_favorites(user_id):
         )
         favorites = _fetchall_dicts(cursor)
         for fav in favorites:
-            itinerary = json.loads(fav["response_json"]) if fav["response_json"] else None
+            raw = re.sub(r'\bNaN\b', 'null', fav["response_json"]) if fav["response_json"] else None
+            itinerary = json.loads(raw) if raw else None
             fav["itinerary"] = with_image_urls(itinerary) if itinerary else None
             del fav["response_json"]
             if fav.get("created_at"):
@@ -134,7 +136,8 @@ def get_history(user_id):
         )
         history = _fetchall_dicts(cursor)
         for item in history:
-            itinerary = json.loads(item["response_json"]) if item["response_json"] else None
+            raw = re.sub(r'\bNaN\b', 'null', item["response_json"]) if item["response_json"] else None
+            itinerary = json.loads(raw) if raw else None
             item["itinerary"] = with_image_urls(itinerary) if itinerary else None
             del item["response_json"]
             if item.get("created_at"):
