@@ -93,9 +93,19 @@ def _candidate_city_keys(placename: str) -> list:
 def get_city_image(system, placename: str, state: str = "") -> str:
     """Return CDN filename for the top-rated place in the given city, or ''.
 
-    Tries multiple normalised forms of the city name, then falls back to a
-    keyword LIKE search on image_name so names like 'Leh-Ladakh' still resolve.
+    Checks _CITY_IMAGE_OVERRIDE first (curated fixes for known bad DB images),
+    then queries the DB, then falls back to a keyword LIKE search on image_name.
     """
+    # Check curated override first — avoids wrong-city images in DB
+    try:
+        from features.places.service import _CITY_IMAGE_OVERRIDE
+        for key in _candidate_city_keys(placename):
+            override = _CITY_IMAGE_OVERRIDE.get(key.lower())
+            if override:
+                return override
+    except Exception:
+        pass
+
     _SQL = (
         "SELECT TOP 1 i.image_name "
         "FROM images i "

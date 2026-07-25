@@ -296,6 +296,7 @@ _CITY_IMAGE_OVERRIDE = {
     'bangalore':          'Vidhana_Soudha_Bangalore_Karnataka1744824261443.webp',
     'dehradun':           'Forest_Research_Institute_Dehradun_Uttarakhand1744839332689.webp',
     'alleppey':           'Alleppey_Backwaters_Alappuzha_Kerala.webp',
+    'udaipur':            'city_palace_udaipur_Rajasthan_0.webp',
 }
 
 
