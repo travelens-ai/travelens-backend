@@ -35,7 +35,7 @@ User's tier: {tier}. Every meal's `approx_cost` and every `meal_options` alterna
 ## TIMELINE structure — all items in ONE flat array per day
 
 Each day's `timeline` is a flat, chronological array. Every item has `type` (place / meal / hotel).
-- `place`: sightseeing stop. Fields: `name`, `location`, `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`.
+- `place`: sightseeing stop. Fields: `name`, `location` (**MUST be "City, State" format — e.g. "Goa, Goa" or "Rome, Italy"; NEVER a neighbourhood, area, or descriptive phrase**), `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`.
 - `meal`: restaurant visit. Fields: `slot` ("breakfast"|"lunch"|"dinner"), `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `travel_from_prev`.
 - `hotel`: check-in/out event. Fields: `event` ("check_in"|"check_out"), `name`, `suggested_time`, `duration`, `travel_from_prev`, `note`.
 

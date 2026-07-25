@@ -378,7 +378,15 @@ def _sort_timeline_by_time(days):
             day['timeline'] = sorted(timeline, key=_parse_time_key)
 
 
-def finalize_days(system, itinerary, days, places, start_date=None, start_day_index=0):
+def _extract_country(places_of_interest):
+    """Return the last comma-segment of places_of_interest as the country name.
+    'Paris, France' → 'France'; 'Italy' → 'Italy'; 'Goa, Goa' → 'Goa' (unused for India)."""
+    parts = [p.strip() for p in str(places_of_interest or '').split(',')]
+    return parts[-1] if parts and parts[-1] else None
+
+
+def finalize_days(system, itinerary, days, places, start_date=None, start_day_index=0,
+                  user_preferences=None):
     fallback_map = getattr(system, '_place_image_fallback', {}) or {}
     all_place_names = [
         str(item.get('name', '')).strip()
@@ -448,7 +456,23 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
         except ValueError:
             pass
 
-    threading.Thread(target=_dbp.save_new_places, args=(system, copy.deepcopy(ctx)), daemon=True).start()
+    _state_name = itinerary.get('state', '')
+    _places_df = getattr(system, 'places_df', None)
+    _is_indian = bool(
+        _state_name and _places_df is not None and
+        not _places_df[_places_df['state'].fillna('').str.lower() == _state_name.lower()].empty
+    )
+    if _is_indian:
+        _country = 'India'
+    else:
+        _poi = (user_preferences or {}).get('places_of_interest', '') or _state_name
+        _country = _extract_country(_poi)
+    threading.Thread(
+        target=_dbp.save_new_places,
+        args=(system, copy.deepcopy(ctx)),
+        kwargs={'country': _country},
+        daemon=True,
+    ).start()
 
     cleaned = json.loads(json.dumps(days, default=lambda x: '' if pd.isna(x) else x))
     return cleaned
@@ -468,7 +492,7 @@ def finalize_itinerary(system, itinerary, places, start_date=None, user_preferen
             with _TPE(max_workers=2) as ex:
                 fut_days = ex.submit(
                     contextvars.copy_context().run, finalize_days, system, itinerary, days, places,
-                    start_date=start_date, start_day_index=0
+                    start_date=start_date, start_day_index=0, user_preferences=user_preferences
                 )
                 fut_avail = ex.submit(
                     contextvars.copy_context().run, _rec.get_available_places, system, itinerary,
