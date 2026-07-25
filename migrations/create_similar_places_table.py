@@ -125,13 +125,12 @@ def main():
             skipped_no_city += 1
             continue
 
-        # Check existing
-        cursor.execute("SELECT 1 FROM similar_places WHERE city_id = ?", (city_id,))
-        already_exists = cursor.fetchone() is not None
-
-        if already_exists:
-            skipped_exists += 1
-            continue
+        # Check existing (skip if table doesn't exist yet — dry-run before CREATE)
+        if not args.dry_run:
+            cursor.execute("SELECT 1 FROM similar_places WHERE city_id = ?", (city_id,))
+            if cursor.fetchone() is not None:
+                skipped_exists += 1
+                continue
 
         if args.dry_run:
             print(f"  [dry-run] Would INSERT city_id={city_id} for '{placename}'")
