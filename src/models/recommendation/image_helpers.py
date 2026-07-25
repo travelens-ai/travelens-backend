@@ -1,3 +1,5 @@
+import re
+
 from core.db import fetch_dicts
 
 
@@ -64,3 +66,59 @@ def search_image_by_keywords(system, keywords):
     """Single-image variant — returns first match or None."""
     images = search_images_by_keywords(system, keywords, limit=1)
     return images[0] if images else None
+
+
+def _candidate_city_keys(placename: str) -> list:
+    """Return a list of city name strings to try, most specific first."""
+    name = placename.strip()
+    candidates = [name, name.lower()]
+    # "Leh-Ladakh" -> "leh"
+    for sep in (" and ", "-", ","):
+        if sep in name.lower():
+            parts = re.split(re.escape(sep), name, flags=re.IGNORECASE)
+            for p in parts:
+                p = p.strip()
+                if p:
+                    candidates.extend([p, p.lower()])
+    # deduplicate preserving order
+    seen = set()
+    result = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            result.append(c)
+    return result
+
+
+def get_city_image(system, placename: str, state: str = "") -> str:
+    """Return CDN filename for the top-rated place in the given city, or ''.
+
+    Tries multiple normalised forms of the city name, then falls back to a
+    keyword LIKE search on image_name so names like 'Leh-Ladakh' still resolve.
+    """
+    _SQL = (
+        "SELECT TOP 1 i.image_name "
+        "FROM images i "
+        "JOIN place_image_map pim ON pim.image_id = i.id "
+        "JOIN places p            ON pim.place_id  = p.id "
+        "JOIN cities c            ON p.city_id     = c.id "
+        "WHERE LOWER(c.name) = LOWER(?) "
+        "ORDER BY "
+        "  CASE WHEN i.image_name LIKE '%\\_0.webp' ESCAPE '\\' THEN 0 ELSE 1 END, "
+        "  COALESCE(p.rating, 0) DESC, "
+        "  COALESCE(p.num_ratings, 0) DESC"
+    )
+    for key in _candidate_city_keys(placename):
+        try:
+            rows = fetch_dicts(_SQL, (key,))
+            if rows:
+                return rows[0]["image_name"]
+        except Exception as e:
+            print(f"[get_city_image] DB error for '{key}': {e}")
+
+    # Fallback: LIKE search on image filenames using placename + state
+    keywords = [placename]
+    if state:
+        keywords.append(state)
+    img = search_image_by_keywords(system, keywords)
+    return img or ""

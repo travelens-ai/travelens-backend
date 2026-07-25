@@ -347,7 +347,9 @@ def finalize_trip_level(system, itinerary, places):
         if img and pd.notna(img) and str(img).strip():
             place['image'] = img
         else:
-            place['image'] = 'default' + str(random.randint(1, 7)) + '.webp'
+            # pkl has no image — query DB live so this response gets a real image
+            db_img = _img.get_city_image(system, sp_name or '', place.get('state', '')) if sp_name else ''
+            place['image'] = db_img if db_img else 'default' + str(random.randint(1, 7)) + '.webp'
 
     system._place_image_fallback = {
         str(name).strip().lower(): img for name, img in place_image_map.items()

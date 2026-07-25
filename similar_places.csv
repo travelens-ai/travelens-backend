@@ -3,7 +3,7 @@ Leh-Ladakh,Similar high-altitude desert landscape with monasteries and adventure
 Kinnaur,Another beautiful valley in Himachal Pradesh with stunning views and monasteries.,Himachal Pradesh,Kinnaur.webp,₹35000-₹45000
 Tawang,Remote Himalayan town with monasteries and scenic beauty.,Arunachal Pradesh,Tawang.webp,₹35000-₹45000
 Mcleod Ganj,"Similar to Tawang, Mcleod Ganj offers a blend of Tibetan culture, monasteries, and scenic beauty, ideal for friends seeking adventure and cultural experiences.",Himachal Pradesh,Mcleod_Ganj.webp,₹35000-₹45000
-Pondicherry,"Similar to Goa with a French colonial influence, beaches, and relaxed vibe, suitable for couples seeking a mix of culture and relaxation.",Puducherry,,"₹10,000 - ₹40,000"
+Pondicherry,"Similar to Goa with a French colonial influence, beaches, and relaxed vibe, suitable for couples seeking a mix of culture and relaxation.",Puducherry,Basilica_of_the_Sacred_Heart_of_Jesus_pondicherry_Tamil_Nadu_2.webp,"₹10,000 - ₹40,000"
 Gokarna,"A quieter alternative to Goa, offering beautiful beaches, temples, and a more laid-back atmosphere, ideal for adventure-seeking couples.",Karnataka,Gokarna.webp,"₹8,000 - ₹30,000"
 Amarnath Cave,"Another significant Hindu shrine in Jammu & Kashmir, known for its ice lingam and challenging trek, appealing to those seeking religious pilgrimage and trekking experiences.",Jammu & Kashmir,Amarnath_Cave.webp,"₹6,000 - ₹18,000"
 Haridwar,"A major Hindu pilgrimage site in Uttarakhand, known for its ghats along the Ganges River and numerous temples, offering a similar religious and spiritual experience.",Uttarakhand,Haridwar.webp,"₹4,000 - ₹12,000"
@@ -18,7 +18,7 @@ Munnar,"Similar to Coorg, Munnar is a hill station in Kerala known for its tea p
 Ooty,"Ooty, in Tamil Nadu, offers similar experiences with its botanical gardens, tea estates, and scenic landscapes, appealing to those interested in nature and sightseeing.",Tamil Nadu,Ooty.webp,₹5000-₹14000
 Humayun's Tomb,"Similar Mughal architecture and historical significance, located in Delhi.",Delhi,Humayun's_Tomb.webp,₹5000-₹15000
 Fatehpur Sikri,"A historical city near Agra, showcasing Mughal architecture and history.",Uttar Pradesh,Fatehpur_Sikri.webp,₹7000-₹20000
-Hampi,"Similar to Fatehpur Sikri, Hampi offers a rich historical experience with its ruins and temples, perfect for sightseeing and photography.",Karnataka,,"₹4,000 - ₹40,000"
+Hampi,"Similar to Fatehpur Sikri, Hampi offers a rich historical experience with its ruins and temples, perfect for sightseeing and photography.",Karnataka,Shree_Vijaya_Vitthala_Temple_Hampi_Karnataka_0.webp,"₹4,000 - ₹40,000"
 Khajuraho,"Known for its ancient temples and intricate sculptures, Khajuraho is ideal for couples interested in historical sites and photography.",Madhya Pradesh,Khajuraho.webp,"₹3,500 - ₹35,000"
 Agra,"Home to the Taj Mahal and other Mughal-era monuments, offering a rich historical and cultural experience.",Uttar Pradesh,Agra.webp,"₹5,000 - ₹20,000"
 Delhi,"Capital city with numerous historical sites, including Humayun's Tomb and Qutub Minar, reflecting diverse architectural styles.",Delhi,Delhi.webp,"₹4,000 - ₹18,000"
@@ -51,143 +51,155 @@ Kasol,"Similar to Rishikesh, Kasol offers a blend of adventure and natural beaut
 Bir Billing,"Known for paragliding, Bir Billing is a great alternative for adventure enthusiasts looking for thrilling experiences with friends.",Himachal Pradesh,Bir_Billing.webp,"₹6,000 - ₹30,000"
 Bandhavgarh National Park,Offers similar tiger safari and bird-watching experiences with a dense forested landscape.,Madhya Pradesh,,₹8000–₹12000 per person
 Pench National Park,Great for couples seeking tiger safaris and nature trails in a tranquil setting.,Madhya Pradesh,,₹7000–₹11000 per person
-Bikaner,"Rich in history and culture, excellent for fort visits and cultural experiences",Rajasthan,,₹7000–₹10000 per head
-Phoenix Marketcity,An excellent alternative for luxury shopping and dining experiences,Maharashtra,,₹10000–₹30000 per head
-Orion Mall,Known for upscale retail and fine dining options,Karnataka,,₹10000–₹25000 per head
-Chittorgarh Fort,"For history and photography lovers, with stunning Rajput architecture",Rajasthan,,₹10000–₹15000 per person
+Bikaner,"Rich in history and culture, excellent for fort visits and cultural experiences",Rajasthan,Junagarh_Fort_Bikaner_Rajasthan_0.webp,₹7000–₹10000 per head
+Phoenix Marketcity,An excellent alternative for luxury shopping and dining experiences,Maharashtra,Amboli_ghat_Amboli_Maharashtra_0.webp,₹10000–₹30000 per head
+Orion Mall,Known for upscale retail and fine dining options,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,₹10000–₹25000 per head
+Chittorgarh Fort,"For history and photography lovers, with stunning Rajput architecture",Rajasthan,Gagron_Fort_Gagron_Rajasthan_0.webp,₹10000–₹15000 per person
 Orchha Fort,Historical monuments with a mix of Mughal and Rajput architecture ideal for photography,Madhya Pradesh,,₹8000–₹12000 per person
-Khasi Hills,Ideal for trekking and photography amidst natural beauty in Meghalaya,Meghalaya,,₹7000–₹11000 per head
-Majuli Island,"Famous for photography, camping, and cultural exploration in Assam",Assam,,₹6000–₹10000 per head
+Khasi Hills,Ideal for trekking and photography amidst natural beauty in Meghalaya,Meghalaya,Mawphlang_David_Scott_Trail_-_East_Khasi_Hills_District__Meghalaya__India_Synrang_Kaban_Meghalaya_0.webp,₹7000–₹11000 per head
+Majuli Island,"Famous for photography, camping, and cultural exploration in Assam",Assam,Majuli_University_of_Culture_Patharichuk_N_C__Assam_0.webp,₹6000–₹10000 per head
 Tawang Valley,A serene hillside destination with trekking and cultural exploration opportunities.,Arunachal Pradesh,,₹10000–₹18000
 Tso Moriri Lake,Another breathtaking high-altitude lake in Ladakh.,Jammu and Kashmir,,"₹9,000–₹12,000"
 Dal Lake,Serene lake known for Shikara rides in Srinagar.,Jammu and Kashmir,,"₹6,000–₹9,000"
-Mawlynnong Village,"Known as the cleanest village in Asia, offering nature and cultural beauty",Meghalaya,,"₹8,000–₹12,000 per head"
-Somnath,"Another Jyotirlinga site, perfect for religious and architectural exploration",Gujarat,,"₹8,000–₹12,000 per head"
-Mathura,"Birthplace of Lord Krishna, ideal for religious and pilgrimage trips",Uttar Pradesh,,"₹10,000–₹15,000 per head"
-Dharamshala,"A charming mix of natural beauty and cultural experiences, perfect for trekking and group outings.",Himachal Pradesh,,"₹11,000–₹13,000"
+Mawlynnong Village,"Known as the cleanest village in Asia, offering nature and cultural beauty",Meghalaya,elephant_falls_shillong_Meghalaya_0.webp,"₹8,000–₹12,000 per head"
+Somnath,"Another Jyotirlinga site, perfect for religious and architectural exploration",Gujarat,Shree_Somnath_Temple_Somnath_Gujarat_0.webp,"₹8,000–₹12,000 per head"
+Mathura,"Birthplace of Lord Krishna, ideal for religious and pilgrimage trips",Uttar Pradesh,Shri_Krishna_Janmasthan_Mathura_Uttar_Pradesh_0.webp,"₹10,000–₹15,000 per head"
+Dharamshala,"A charming mix of natural beauty and cultural experiences, perfect for trekking and group outings.",Himachal Pradesh,Dalai_Lama_Temple__Tsuglagkhang_Complex_Dharamshala_Himachal_Pradesh_0.webp,"₹11,000–₹13,000"
 Rameswaram,"A spiritual destination famous for its temples, ideal for religious visits and photography",Tamil Nadu,,₹5000–₹12000 per head
-Madurai,"Known for the Meenakshi Temple, rich heritage, and architecture enthusiasts",Tamil Nadu,,₹5000–₹12000 per head
-Harmandir Sahib,Another sacred Sikh gurdwara similar to the Golden Temple.,Punjab,,₹4000–₹10000 per person
+Madurai,"Known for the Meenakshi Temple, rich heritage, and architecture enthusiasts",Tamil Nadu,Meenakshi_Amman_Temple_Madurai_Tamil_Nadu_0.webp,₹5000–₹12000 per head
+Harmandir Sahib,Another sacred Sikh gurdwara similar to the Golden Temple.,Punjab,Chattbir_Zoo_park_Chhat_Punjab_0.webp,₹4000–₹10000 per person
 Vaishno Devi Temple,"Located in Jammu, suited for religious seekers and devotees, offering opportunities for prayer and meditation.",Jammu and Kashmir,,₹5000–₹12000 per person
-Mokokchung,"Offers trekking and cultural experiences, ideal for couples and nature enthusiasts.",Nagaland,,"₹10,000–₹15,000 per head"
+Mokokchung,"Offers trekking and cultural experiences, ideal for couples and nature enthusiasts.",Nagaland,Impur_Baptist_Arogo_Church_Impur_Comp__Nagaland_0.webp,"₹10,000–₹15,000 per head"
 Mechuka Valley,"A serene valley in Arunachal Pradesh, ideal for trekking and nature enthusiasts, with picturesque landscapes.",Arunachal Pradesh,,₹12000–₹20000 per head
-Ranthambore National Park,"One of India's iconic wildlife sanctuaries, renowned for tiger sightings and historical ruins inside its territory.",Rajasthan,,₹14000–₹28000 per head
-Udupi,"Known for its pristine beaches, authentic South Indian food, and serene atmosphere, ideal for a relaxed getaway.",Karnataka,,₹4000–₹8000 per person
-Shravanabelagola,"A key Jain pilgrimage site with a massive monolithic statue of Gommateshwara, perfect for spiritual travelers.",Karnataka,,"₹5,000–₹13,000"
-Somnath Temple,"One of the most significant temples in India, ideal for prayer and spiritual reflection",Gujarat,,₹6000–₹12000 per head
-Tsomoriri Lake,Scenic high-altitude lake in Ladakh known for its pristine beauty and peaceful surroundings.,Ladakh,,₹9000–₹17000 per head
-Meghamalai,"A serene hill station with lush greenery, ideal for couples and nature lovers.",Tamil Nadu,,"₹8,000–₹12,000 per head"
-Yumthang Valley,"Known as the Valley of Flowers, ideal for trekking, nature walks, and photography",Sikkim,,₹8000–₹16000
-Valley of Flowers National Park,A UNESCO World Heritage Site offering stunning floral beauty and great trekking opportunities,Uttarakhand,,₹9000–₹14000 per head
+Ranthambore National Park,"One of India's iconic wildlife sanctuaries, renowned for tiger sightings and historical ruins inside its territory.",Rajasthan,Gagron_Fort_Gagron_Rajasthan_0.webp,₹14000–₹28000 per head
+Udupi,"Known for its pristine beaches, authentic South Indian food, and serene atmosphere, ideal for a relaxed getaway.",Karnataka,Udupi_Shri_Krishna_Matha_Udupi_Karnataka_0.webp,₹4000–₹8000 per person
+Shravanabelagola,"A key Jain pilgrimage site with a massive monolithic statue of Gommateshwara, perfect for spiritual travelers.",Karnataka,Gommateshwara_statue_Shravanbela_Gola__Rural__Karnataka_0.webp,"₹5,000–₹13,000"
+Somnath Temple,"One of the most significant temples in India, ideal for prayer and spiritual reflection",Gujarat,Kutch_s_white_desert__Rann_of_Kutch__Dhordo_Gujarat_0.webp,₹6000–₹12000 per head
+Tsomoriri Lake,Scenic high-altitude lake in Ladakh known for its pristine beauty and peaceful surroundings.,Ladakh,Shanti_Stupa_Leh_Ladakh_0.webp,₹9000–₹17000 per head
+Meghamalai,"A serene hill station with lush greenery, ideal for couples and nature lovers.",Tamil Nadu,Meghamalai_Theni_Tamil_Nadu.webp,"₹8,000–₹12,000 per head"
+Yumthang Valley,"Known as the Valley of Flowers, ideal for trekking, nature walks, and photography",Sikkim,Nathula_Shigatse_Sikkim_0.webp,₹8000–₹16000
+Valley of Flowers National Park,A UNESCO World Heritage Site offering stunning floral beauty and great trekking opportunities,Uttarakhand,The_Sylvan_Retreat_Dehradun_Dehradun_Uttarakhand_0.webp,₹9000–₹14000 per head
 Ziro Valley,"Popular for rice fields, trekking opportunities, and its rich cultural heritage.",Arunachal Pradesh,,₹18000–₹23000 per head
-Jaipur,"Known for its heritage sites, shopping bazaars, and North Indian cuisine. Great fit for cultural exploration and relaxation.",Rajasthan,,₹3000–₹10000 per head
+Jaipur,"Known for its heritage sites, shopping bazaars, and North Indian cuisine. Great fit for cultural exploration and relaxation.",Rajasthan,city_palace_jaipur_Rajasthan_0.webp,₹3000–₹10000 per head
 Vaishno Devi,"A spiritual and pilgrimage hotspot in the mountains, perfect for prayer and devotion.",Jammu and Kashmir,,"₹15,000–₹35,000 per head"
-Rameshwaram,"A spiritual island known for its temples and mythological importance, ideal for pilgrimage and architecture lovers",Tamil Nadu,,"₹8000–₹18,000 per head for 3–4 days"
-Kanha National Park,Ideal for couples keen on wildlife photography and serene nature trails.,Madhya Pradesh,,₹8000–₹16000 per head
-Khardung La Pass,Another high-altitude destination offering scenic mountain views,Ladakh,,₹12000–₹18000 per head
+Rameshwaram,"A spiritual island known for its temples and mythological importance, ideal for pilgrimage and architecture lovers",Tamil Nadu,Sri_Arulmigu_Ramanathaswamy_Temple_Rameshwaram_Tamil_Nadu_0.webp,"₹8000–₹18,000 per head for 3–4 days"
+Kanha National Park,Ideal for couples keen on wildlife photography and serene nature trails.,Madhya Pradesh,Sunset_View_Point__Kanha_Khuksar_Madhya_Pradesh_0.webp,₹8000–₹16000 per head
+Khardung La Pass,Another high-altitude destination offering scenic mountain views,Ladakh,Shanti_Stupa_Leh_Ladakh_0.webp,₹12000–₹18000 per head
 Andaman and Nicobar Islands,"Known for its beautiful coral reefs, beaches, and diverse marine life, Andamans is a haven for diving enthusiasts.",Andaman and Nicobar,,"₹30,000–₹60,000 per head"
-Phawngpui Blue Mountain National Park,"Known for trekking, scenic beauty, and a serene environment, similar to Dzuko Valley.",Mizoram,,"₹8,000–₹13,000 per head"
-Cherrapunji,"Famed for its lush greenery, living root bridges, and adventure opportunities.",Meghalaya,,"₹6,000–₹10,000 per head"
-Havelock Island,Beautiful beaches and excellent scuba diving opportunities in the Andaman & Nicobar Islands.,Andaman and Nicobar Islands,,"₹20,000–₹30,000 per head"
-Varkala Beach,"Known for its dramatic cliffs, stunning beaches, and ayurvedic therapies in Kerala.",Kerala,,"₹10,000–₹15,000 per head"
-Agatti Island,"Known for its beaches and water sports, ideal for kayaking and couples' getaways.",Lakshadweep,,₹14000–₹30000 per head
-Bangaram Island,"A tranquil island popular for its coral reefs and water-based activities, perfect for couples seeking exclusivity and marine exploration.",Lakshadweep,,"₹20,000–₹30,000 per head"
-Chopta Valley,"Known for its beautiful meadows and trekking trails, perfect for nature and adventure enthusiasts",Uttarakhand,,₹7000–₹12000 per head
-Ujjain,Another holy city featuring Mahakaleshwar Jyotirlinga and rich in Hindu culture.,Madhya Pradesh,,₹7000–₹11000 per head
-Agonda Beach,"A serene beach in Goa, great for couples seeking a quieter location for sunbathing and relaxation.",Goa,,₹20000–₹30000
-Tso Moriri,"A serene high-altitude lake in Ladakh, perfect for those seeking peaceful natural beauty and unique landscapes.",Ladakh,,₹15000–₹20000 per head
-Girnar Hill,Popular for Jain temples and challenging trekking routes for pilgrims,Gujarat,,"₹7,000–13,000 per head"
-UB City Mall,A premium mall in Bangalore known for its luxury brands and vibrant dining options,Karnataka,,₹20000–₹45000 per head for the entire trip
-Kaziranga National Park,"A UNESCO World Heritage Site famous for one-horned rhinoceroses and rich wildlife, perfect for nature lovers.",Assam,,₹6000–₹10000 per head
-Sundarbans National Park,"The largest mangrove forest in the world, ideal for spotting tigers and rare aquatic species.",West Bengal,,₹8000–₹15000 per head
-Chikmagalur,"Known for coffee plantations, lush greenery, and tranquil retreats.",Karnataka,,₹14000–₹19000 per head
-Neil Island,"Quieter than Havelock, Neil Island offers stunning coral reefs, clear waters, and a relaxing atmosphere.",Andaman and Nicobar Islands,,"₹15,000–₹30,000 per head"
-Skandagiri Hills,"Great for trekking and sunrise experiences, close to Nandi Hills",Karnataka,,"₹4,000–₹5,000 per person"
-Savandurga Hill,Challenging trek and peaceful surroundings for nature lovers,Karnataka,,"₹4,500–₹5,500 per person"
-Devarayanadurga,Lush greenery and trekking trails with scenic hilltop views,Karnataka,,"₹4,000–₹5,000 per person"
-Mullayanagiri,Perfect for trekking and adventure seekers with stunning views.,Karnataka,,"₹4,000–₹4,500 per person"
-Nandi Hills,Another excellent trekking destination close to Bangalore,Karnataka,,"₹3,500–₹4,000 per person"
-Savandurga,Popular for rock climbing and easy day treks near Bangalore.,Karnataka,,"₹2,800–₹3,500 per person"
-Kudremukha,Perfect for trekking amidst lush greenery and cool mountain weather.,Karnataka,,"₹3,000–₹3,500 per person"
-Nagarahole Tiger Reserve,"Another great destination for wildlife enthusiasts, offering tiger sightings and nature treks.",Karnataka,,"₹3,000–₹4,000 per person"
-Dubare Elephant Camp,An engaging experience where you can interact with and bathe elephants by the river.,Karnataka,,"₹3,000–₹3,500 per person"
-Mysuru,Known for its grand palace and vibrant cultural landmarks.,Karnataka,,"₹2,500–₹3,500 per person"
-Mullayanagiri Peak,A serene trekking and sunrise destination in Chikkamagaluru.,Karnataka,,"₹4,000–₹5,500 per person"
-Coorg (Kodagu),Beautiful hill station with dense forests and scenic views.,Karnataka,,"₹5,000–₹7,000 per person"
+Phawngpui Blue Mountain National Park,"Known for trekking, scenic beauty, and a serene environment, similar to Dzuko Valley.",Mizoram,Mizoram_State_Museum_Aizawl_Mizoram_0.webp,"₹8,000–₹13,000 per head"
+Cherrapunji,"Famed for its lush greenery, living root bridges, and adventure opportunities.",Meghalaya,Mawsmai_Cave_Cherrapunji_Meghalaya.webp,"₹6,000–₹10,000 per head"
+Havelock Island,Beautiful beaches and excellent scuba diving opportunities in the Andaman & Nicobar Islands.,Andaman and Nicobar Islands,Radhanagar_Beach_havelock_island_Andaman_and_Nicobar_Islands_0.webp,"₹20,000–₹30,000 per head"
+Varkala Beach,"Known for its dramatic cliffs, stunning beaches, and ayurvedic therapies in Kerala.",Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹10,000–₹15,000 per head"
+Agatti Island,"Known for its beaches and water sports, ideal for kayaking and couples' getaways.",Lakshadweep,Minicoy_Island_Lighthouse_Lakshadweep_Lakshadweep_0.webp,₹14000–₹30000 per head
+Bangaram Island,"A tranquil island popular for its coral reefs and water-based activities, perfect for couples seeking exclusivity and marine exploration.",Lakshadweep,Minicoy_Island_Lighthouse_Lakshadweep_Lakshadweep_0.webp,"₹20,000–₹30,000 per head"
+Chopta Valley,"Known for its beautiful meadows and trekking trails, perfect for nature and adventure enthusiasts",Uttarakhand,The_Sylvan_Retreat_Dehradun_Dehradun_Uttarakhand_0.webp,₹7000–₹12000 per head
+Ujjain,Another holy city featuring Mahakaleshwar Jyotirlinga and rich in Hindu culture.,Madhya Pradesh,Shri_Mahakaleshwar_Jyotirlinga_Temple_Ujjain_Madhya_Pradesh_0.webp,₹7000–₹11000 per head
+Agonda Beach,"A serene beach in Goa, great for couples seeking a quieter location for sunbathing and relaxation.",Goa,Calangute_Beach__Goa_Calangute_Goa_0.webp,₹20000–₹30000
+Tso Moriri,"A serene high-altitude lake in Ladakh, perfect for those seeking peaceful natural beauty and unique landscapes.",Ladakh,Shanti_Stupa_Leh_Ladakh_0.webp,₹15000–₹20000 per head
+Girnar Hill,Popular for Jain temples and challenging trekking routes for pilgrims,Gujarat,Kutch_s_white_desert__Rann_of_Kutch__Dhordo_Gujarat_0.webp,"₹7,000–13,000 per head"
+UB City Mall,A premium mall in Bangalore known for its luxury brands and vibrant dining options,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,₹20000–₹45000 per head for the entire trip
+Kaziranga National Park,"A UNESCO World Heritage Site famous for one-horned rhinoceroses and rich wildlife, perfect for nature lovers.",Assam,The_Orang_National_Park_No_3_Shyampurchapari_Assam_0.webp,₹6000–₹10000 per head
+Sundarbans National Park,"The largest mangrove forest in the world, ideal for spotting tigers and rare aquatic species.",West Bengal,Sajnekhali_Wildlife_Sanctuary_Gosaba_West_Bengal_0.webp,₹8000–₹15000 per head
+Chikmagalur,"Known for coffee plantations, lush greenery, and tranquil retreats.",Karnataka,Mullayanagiri_Peak_Aralaguppe_Karnataka_0.webp,₹14000–₹19000 per head
+Neil Island,"Quieter than Havelock, Neil Island offers stunning coral reefs, clear waters, and a relaxing atmosphere.",Andaman and Nicobar Islands,Laxmanpur_Beach_No_1_Lakshmanpur_Andaman_and_Nicobar_Islands_0.webp,"₹15,000–₹30,000 per head"
+Skandagiri Hills,"Great for trekking and sunrise experiences, close to Nandi Hills",Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹4,000–₹5,000 per person"
+Savandurga Hill,Challenging trek and peaceful surroundings for nature lovers,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹4,500–₹5,500 per person"
+Devarayanadurga,Lush greenery and trekking trails with scenic hilltop views,Karnataka,Devarayanadurga_Devarayanadurga_Karnataka_0.webp,"₹4,000–₹5,000 per person"
+Mullayanagiri,Perfect for trekking and adventure seekers with stunning views.,Karnataka,Mullayanagiri_Peak_Aralaguppe_Karnataka_0.webp,"₹4,000–₹4,500 per person"
+Nandi Hills,Another excellent trekking destination close to Bangalore,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹3,500–₹4,000 per person"
+Savandurga,Popular for rock climbing and easy day treks near Bangalore.,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹2,800–₹3,500 per person"
+Kudremukha,Perfect for trekking amidst lush greenery and cool mountain weather.,Karnataka,Kudremukha_Mysore_Division_Karnataka_0.webp,"₹3,000–₹3,500 per person"
+Nagarahole Tiger Reserve,"Another great destination for wildlife enthusiasts, offering tiger sightings and nature treks.",Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹3,000–₹4,000 per person"
+Dubare Elephant Camp,An engaging experience where you can interact with and bathe elephants by the river.,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹3,000–₹3,500 per person"
+Mysuru,Known for its grand palace and vibrant cultural landmarks.,Karnataka,Shree_Chamundeshwari_Devi_Temple_Chamundibetta_Karnataka_0.webp,"₹2,500–₹3,500 per person"
+Mullayanagiri Peak,A serene trekking and sunrise destination in Chikkamagaluru.,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹4,000–₹5,500 per person"
+Coorg (Kodagu),Beautiful hill station with dense forests and scenic views.,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹5,000–₹7,000 per person"
 Coorg,"Known for its lush greenery, waterfalls, and trekking routes.",Karnataka,Coorg.webp,"₹9,000–₹11,000 per person"
-Kerala Backwaters,A serene escape with houseboat stays and lush green surroundings,Kerala,,"₹15,000–₹20,000"
-Kerala (Varkala Beach),For tranquil beaches and Ayurvedic spa experiences,Kerala,,"₹15,000–₹18,000 per person"
+Kerala Backwaters,A serene escape with houseboat stays and lush green surroundings,Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹15,000–₹20,000"
+Kerala (Varkala Beach),For tranquil beaches and Ayurvedic spa experiences,Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹15,000–₹18,000 per person"
 Andaman (Havelock Island),"White sand beaches and crystal-clear waters, perfect for couples",Andaman and Nicobar Islands,,"₹20,000–₹25,000 per person"
-Wayanad,Similar nature-centric experience with trekking spots and serene landscapes.,Kerala,,"₹10,000–₹15,000"
-Kodagu,Another escape in Karnataka offering stunning natural beauty and trekking opportunities.,Karnataka,,"₹9,000–₹13,000"
-Shillong,"Known for waterfalls, viewpoints, and the Meghalaya hills.",Meghalaya,,"₹14,000–₹18,000 per head"
+Wayanad,Similar nature-centric experience with trekking spots and serene landscapes.,Kerala,Chembra_Kozhikode_Kerala_0.webp,"₹10,000–₹15,000"
+Kodagu,Another escape in Karnataka offering stunning natural beauty and trekking opportunities.,Karnataka,Tala_Kaveri_Kodagu_Karnataka_0.webp,"₹9,000–₹13,000"
+Shillong,"Known for waterfalls, viewpoints, and the Meghalaya hills.",Meghalaya,Cathedral_of_Mary_Help_of_Christians_Shillong_Meghalaya_0.webp,"₹14,000–₹18,000 per head"
 Arunachal Pradesh,"Explore Tawang, Bomdila, and lush valleys amidst serene beauty.",Arunachal Pradesh,,"₹16,000–₹20,000 per head"
-Pushkar,Religious temples and a sacred lake,Rajasthan,,"₹8,000–₹12,000 per person"
-Dalhousie,A quaint hill station offering tranquility and colonial architecture.,Himachal Pradesh,,"₹10,000–₹14,000 per person"
+Pushkar,Religious temples and a sacred lake,Rajasthan,Pushkar_Camel_Fair_Pushkar_Rajasthan_0.webp,"₹8,000–₹12,000 per person"
+Dalhousie,A quaint hill station offering tranquility and colonial architecture.,Himachal Pradesh,Khajjiar__Dalhousie_Khajjiar_Himachal_Pradesh_0.webp,"₹10,000–₹14,000 per person"
 Andaman & Nicobar Islands,Pristine islands with white sand beaches and underwater adventures.,Andaman & Nicobar Islands,,"₹18,000–₹25,000 per person"
-Kerala (Alleppey and Kochi),"Known for its tranquil backwaters, beaches, and cultural landmarks.",Kerala,,"₹15,000–₹20,000 per person"
-Sikkim,Known for its serene high-altitude landscapes and Buddhist monasteries.,Sikkim,,"₹12,000–₹18,000 per person"
-Manali,Perfect blend of nature and adventure with access to passes like Rohtang.,Himachal Pradesh,,"₹10,000–₹14,000 per person"
-Jaipur (Heritage + Markets),Mughal/royal architecture vibe with fort-culture and great food streets.,Rajasthan,,"₹18,000–₹28,000 per person"
+Kerala (Alleppey and Kochi),"Known for its tranquil backwaters, beaches, and cultural landmarks.",Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹15,000–₹20,000 per person"
+Sikkim,Known for its serene high-altitude landscapes and Buddhist monasteries.,Sikkim,Nathula_Shigatse_Sikkim_0.webp,"₹12,000–₹18,000 per person"
+Manali,Perfect blend of nature and adventure with access to passes like Rohtang.,Himachal Pradesh,Hadimba_Devi_Temple_Manali_Himachal_Pradesh_0.webp,"₹10,000–₹14,000 per person"
+Jaipur (Heritage + Markets),Mughal/royal architecture vibe with fort-culture and great food streets.,Rajasthan,Gagron_Fort_Gagron_Rajasthan_0.webp,"₹18,000–₹28,000 per person"
 Agra (Taj Mahal + Forts),Concentrated UNESCO heritage and easy day pacing around major monuments.,Uttar Pradesh,,"₹14,000–₹22,000 per person"
-Mumbai (City + Coastal Escapes),"If you want an actual beach add-on, combine Mumbai culture with coastal time.",Maharashtra,,"₹12,000–₹20,000 per person"
-Goa (Panaji & North Goa beach circuit),Perfect beach-and-nightlife 2-day format; still allows culture stops (Old Goa/Portuguese lanes).,Goa,,"₹18,000–₹30,000 per person"
-Jaipur (heritage + forts quick loop),Strong culture/sightseeing in 2 days with evening bazaars and easy pacing.,Rajasthan,,"₹15,000–₹25,000 per person"
+Mumbai (City + Coastal Escapes),"If you want an actual beach add-on, combine Mumbai culture with coastal time.",Maharashtra,Amboli_ghat_Amboli_Maharashtra_0.webp,"₹12,000–₹20,000 per person"
+Goa (Panaji & North Goa beach circuit),Perfect beach-and-nightlife 2-day format; still allows culture stops (Old Goa/Portuguese lanes).,Goa,Calangute_Beach__Goa_Calangute_Goa_0.webp,"₹18,000–₹30,000 per person"
+Jaipur (heritage + forts quick loop),Strong culture/sightseeing in 2 days with evening bazaars and easy pacing.,Rajasthan,Gagron_Fort_Gagron_Rajasthan_0.webp,"₹15,000–₹25,000 per person"
 "Agra (Taj & forts, quick heritage burst)",World-famous monuments make a dense but efficient 2-day sightseeing trip.,Uttar Pradesh,,"₹12,000–₹22,000 per person"
-Hampi + Hospet,"Culture + scenery in a compact 2-day format, great for friends and easy pacing.",Karnataka,,"₹12,000–₹20,000 per person"
-Kerala (Kochi + Fort Kochi & Beaches),Culture + coastal food with a similar relaxed pace (monsoon-friendly).,Kerala,,"₹18,000–₹26,000 per person"
-Hampi + Badami (Heritage & Nature),Culture + nature with fewer crowds and road-trip style exploration.,Karnataka,,"₹14,000–₹22,000 per person"
+Hampi + Hospet,"Culture + scenery in a compact 2-day format, great for friends and easy pacing.",Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹12,000–₹20,000 per person"
+Kerala (Kochi + Fort Kochi & Beaches),Culture + coastal food with a similar relaxed pace (monsoon-friendly).,Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹18,000–₹26,000 per person"
+Hampi + Badami (Heritage & Nature),Culture + nature with fewer crowds and road-trip style exploration.,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹14,000–₹22,000 per person"
 Andaman Islands (Port Blair + Havelock),Beach-forward itinerary with great boating and seafood options.,Andaman and Nicobar Islands,,"₹30,000–₹55,000 per person"
 Kovalam + Kanyakumari (Tamil Nadu),Same beach-for-days vibe with viewpoints and cultural history nearby.,Tamil Nadu,,"₹18,000–₹26,000 per person"
-Hampi + Hospet (Karnataka) + River Racks,Monsoon-friendly nature and culture with great heritage pacing.,Karnataka,,"₹16,000–₹24,000 per person"
-Alibaug + Murud (Maharashtra),Closer to Mumbai for beach + relaxed sightseeing on a shorter budget.,Maharashtra,,"₹10,000–₹18,000 per person"
+Hampi + Hospet (Karnataka) + River Racks,Monsoon-friendly nature and culture with great heritage pacing.,Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹16,000–₹24,000 per person"
+Alibaug + Murud (Maharashtra),Closer to Mumbai for beach + relaxed sightseeing on a shorter budget.,Maharashtra,Amboli_ghat_Amboli_Maharashtra_0.webp,"₹10,000–₹18,000 per person"
 Kasol & Tosh (Parvati Valley),"A compact Himalayan nature-culture escape near Manali vibe, with scenic drives, short treks, and relaxed cafes.",Himachal Pradesh,,"₹18,000–₹26,000 per head"
 Dharamshala & McLeod Ganj,"Culture-forward hill town with monasteries, viewpoints, and misty monsoon atmosphere—great for sightseeing plus local food.",Himachal Pradesh,,"₹20,000–₹29,000 per head"
 Shimla (Lakkar Bazaar & Ridge),"Classic sightseeing with heritage charm, pleasant monsoon greens, and easy day outings from the main city core.",Himachal Pradesh,,"₹19,000–₹27,000 per head"
-Kasol and Tosh,"A greener, more relaxed Himachal alternative with riverside cafés, village walks and short treks.",Himachal Pradesh,,"₹18,000–₹26,000 per person"
-Dharamshala and McLeod Ganj,"A strong mix of mountain scenery, Tibetan culture, cafés and monastery visits for a five-day break.",Himachal Pradesh,,"₹20,000–₹28,000 per person"
-Srinagar,"Fits the nature and culture interests with lakes, gardens, mountain views and Kashmiri cuisine.",Jammu and Kashmir,,"₹25,000–₹35,000 per person"
-Alibaug,"A convenient Mumbai-side beach break with forts, seafood and short-road-trip appeal.",Maharashtra,,"₹10,000–₹18,000 per person"
-Varkala,"A scenic cliff-and-beach destination with cafés, culture and monsoon greenery.",Kerala,,"₹18,000–₹28,000 per person"
-Bhutan,"A quieter Himalayan alternative with monasteries, valleys and gentle cultural sightseeing.",Bhutan,,"₹30,000–₹45,000 per person"
-Darjeeling and Kalimpong,"More compact hill destinations with tea gardens, viewpoints, monasteries and easier road logistics.",West Bengal,,"₹18,000–₹28,000 per person"
-Kolkata and Sundarbans,"Bengal culture, river landscapes, seafood and a nature-focused day trip.",West Bengal,,"₹22,000–₹32,000 per person"
-Kochi and Varkala,"Offers Kerala culture, coastal scenery, seafood and a more conventional beach atmosphere.",Kerala,,"₹24,000–₹34,000 per person"
-Mahabalipuram and Pondicherry,"Good for friends wanting heritage monuments, cafés, coastal scenery and a slower seaside break.",Tamil Nadu and Puducherry,,"₹16,000–₹25,000 per person"
+Kasol and Tosh,"A greener, more relaxed Himachal alternative with riverside cafés, village walks and short treks.",Himachal Pradesh,Parvati_Valley_Kasol_Himachal_Pradesh_0.webp,"₹18,000–₹26,000 per person"
+Dharamshala and McLeod Ganj,"A strong mix of mountain scenery, Tibetan culture, cafés and monastery visits for a five-day break.",Himachal Pradesh,Dalai_Lama_Temple__Tsuglagkhang_Complex_Dharamshala_Himachal_Pradesh_0.webp,"₹20,000–₹28,000 per person"
+Srinagar,"Fits the nature and culture interests with lakes, gardens, mountain views and Kashmiri cuisine.",Jammu and Kashmir,Dargah_Hazratbal_Shrine_Srinagar_Jammu_and_Kashmir_0.webp,"₹25,000–₹35,000 per person"
+Alibaug,"A convenient Mumbai-side beach break with forts, seafood and short-road-trip appeal.",Maharashtra,kanakeshwar_devasthan_temple_alibaug_Maharashtra_0.webp,"₹10,000–₹18,000 per person"
+Varkala,"A scenic cliff-and-beach destination with cafés, culture and monsoon greenery.",Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹18,000–₹28,000 per person"
+Bhutan,"A quieter Himalayan alternative with monasteries, valleys and gentle cultural sightseeing.",Bhutan,Bhutanatha_Temple_Badami_Karnataka1744824756877.webp,"₹30,000–₹45,000 per person"
+Darjeeling and Kalimpong,"More compact hill destinations with tea gardens, viewpoints, monasteries and easier road logistics.",West Bengal,tiger_hill_darjeeling_West_Bengal_0.webp,"₹18,000–₹28,000 per person"
+Kolkata and Sundarbans,"Bengal culture, river landscapes, seafood and a nature-focused day trip.",West Bengal,belur_math_kolkata_West_Bengal_0.webp,"₹22,000–₹32,000 per person"
+Kochi and Varkala,"Offers Kerala culture, coastal scenery, seafood and a more conventional beach atmosphere.",Kerala,Chinese_Fishing_Nets_Kochi_Kerala_0.webp,"₹24,000–₹34,000 per person"
+Mahabalipuram and Pondicherry,"Good for friends wanting heritage monuments, cafés, coastal scenery and a slower seaside break.",Tamil Nadu and Puducherry,Arjuna_s_Penance_mahabalipuram_Tamil_Nadu_2.webp,"₹16,000–₹25,000 per person"
 Andaman Islands,"Best for clearer-water beaches, island excursions and a more immersive tropical holiday.",Andaman and Nicobar Islands,,"₹35,000–₹50,000 per person"
-Auli,"Best for dramatic Himalayan views, cable-car experiences and a quieter adventure holiday.",Uttarakhand,,"₹14,000–₹22,000 per person"
-Srinagar and Pahalgam,"A scenic alternative with lakes, meadows and soft adventure in the mountains.",Jammu and Kashmir,,"₹20,000–₹30,000 per person"
-Kasol and Manikaran,"A greener, more laid-back Himalayan alternative with riverside walks, cafés and hot springs.",Himachal Pradesh,,"₹15,000–₹24,000 per person"
-Sakleshpur,"A quieter Western Ghats option with rain-fed landscapes, forest walks and homestays.",Karnataka,,"₹11,000–₹17,000 per person"
-Kerala Coast,"Best for a more immersive relaxed holiday with beaches, cafés and backwater experiences.",Kerala,,"₹18,000–₹28,000 per person"
-Ajmer,"A nearby blend of Mughal-era architecture, pilgrimage sites and lively local markets, ideal for a heritage-focused extension.",Rajasthan,,"₹8,000–₹13,000 per person"
-Jaisalmer,"Best for couples seeking desert landscapes, sandstone architecture and atmospheric evening experiences.",Rajasthan,,"₹16,000–₹25,000 per person"
-Karnataka Coast,"Good for combining beaches, temples and coastal seafood around Udupi and Gokarna.",Karnataka,,"₹20,000–₹28,000 per person"
-Andaman,"Better for island beaches and water activities, though July weather can disrupt boat plans.",Andaman and Nicobar Islands,,"₹28,000–₹40,000 per person"
-Badami and Pattadakal,"A strong alternative for friends who enjoy dramatic landscapes, rock-cut temples and Chalukyan architecture.",Karnataka,,"₹18,000–₹24,000 per person"
-Mysuru and Coorg,"Combines palace culture with misty monsoon hills, coffee estates and easy nature experiences.",Karnataka,,"₹22,000–₹30,000 per person"
+Auli,"Best for dramatic Himalayan views, cable-car experiences and a quieter adventure holiday.",Uttarakhand,The_Cliff_Top_Club__Auli_Joshimath_Uttarakhand_0.webp,"₹14,000–₹22,000 per person"
+Srinagar and Pahalgam,"A scenic alternative with lakes, meadows and soft adventure in the mountains.",Jammu and Kashmir,Dargah_Hazratbal_Shrine_Srinagar_Jammu_and_Kashmir_0.webp,"₹20,000–₹30,000 per person"
+Kasol and Manikaran,"A greener, more laid-back Himalayan alternative with riverside walks, cafés and hot springs.",Himachal Pradesh,Parvati_Valley_Kasol_Himachal_Pradesh_0.webp,"₹15,000–₹24,000 per person"
+Sakleshpur,"A quieter Western Ghats option with rain-fed landscapes, forest walks and homestays.",Karnataka,Bisle_View_Point_sakleshpur_Karnataka_2.webp,"₹11,000–₹17,000 per person"
+Kerala Coast,"Best for a more immersive relaxed holiday with beaches, cafés and backwater experiences.",Kerala,Varkala_Beach_Thiruvananthapuram_Kerala_0.webp,"₹18,000–₹28,000 per person"
+Ajmer,"A nearby blend of Mughal-era architecture, pilgrimage sites and lively local markets, ideal for a heritage-focused extension.",Rajasthan,Khwaja_Gharib_Nawaz_Dargah_Sharif__Ajmer_Rajasthan_0.webp,"₹8,000–₹13,000 per person"
+Jaisalmer,"Best for couples seeking desert landscapes, sandstone architecture and atmospheric evening experiences.",Rajasthan,Jaisalmer_Fort_Jaisalmer_Rajasthan_0.webp,"₹16,000–₹25,000 per person"
+Karnataka Coast,"Good for combining beaches, temples and coastal seafood around Udupi and Gokarna.",Karnataka,Bengaluru_Palace_Bengaluru_Karnataka_0.webp,"₹20,000–₹28,000 per person"
+Andaman,"Better for island beaches and water activities, though July weather can disrupt boat plans.",Andaman and Nicobar Islands,Cellular_Jail_Sri_Vijaya_Puram_Andaman_and_Nicobar_Islands_0.webp,"₹28,000–₹40,000 per person"
+Badami and Pattadakal,"A strong alternative for friends who enjoy dramatic landscapes, rock-cut temples and Chalukyan architecture.",Karnataka,Badami_Cave_Temples_Badami_Karnataka_0.webp,"₹18,000–₹24,000 per person"
+Mysuru and Coorg,"Combines palace culture with misty monsoon hills, coffee estates and easy nature experiences.",Karnataka,Shree_Chamundeshwari_Devi_Temple_Chamundibetta_Karnataka_0.webp,"₹22,000–₹30,000 per person"
 Kinnaur Valley,"Suited to couples seeking dramatic mountain roads, apple orchards and quieter landscapes.",Himachal Pradesh,,"₹28,000–₹38,000 per person"
 Kuala Lumpur,"A more compact Southeast Asian city break with food streets, shopping, nightlife and easy day trips.",Malaysia,,"₹48,000–₹70,000 per person"
-Singapore,"Excellent for food, shopping and polished city sightseeing, though generally more expensive.",Singapore,,"₹70,000–₹95,000 per person"
-Bali,"A better fit if beaches, cafés, nightlife and relaxed island time matter more than multiple cities.",Indonesia,,"₹55,000–₹80,000 per person"
-Udaipur and Jodhpur,"A slower Rajasthan heritage alternative with lakes, forts and atmospheric old-city walks.",Rajasthan,,"₹35,000–₹50,000 per person"
-Lucknow and Ayodhya,"A food-and-heritage route with Nawabi architecture, kebabs and riverside culture.",Uttar Pradesh,,"₹30,000–₹45,000 per person"
-Amritsar and Chandigarh,"A compact heritage and food journey with the Golden Temple, Wagah border and planned-city architecture.",Punjab and Haryana,,"₹28,000–₹42,000 per person"
-Lonavala,"A convenient Pune-side nature escape with waterfalls, viewpoints and scenic monsoon drives.",Maharashtra,,"₹8,000–₹14,000 per person"
-Ranthambore,"Better suited to a nature-first trip, with wildlife safaris, forest landscapes and a historic fort nearby.",Rajasthan,,"₹22,000–₹35,000 per person"
-Ladakh,"Best for dramatic high-altitude landscapes, monasteries and adventure, though July is much drier there.",Ladakh,,"₹35,000–₹55,000 per person"
-Florence,"A strong alternative for Renaissance art, compact walking routes, museums and Tuscan food over three days.",Italy,,"₹45,000–₹55,000 per person"
-Venice,"Ideal for canals, Gothic architecture, lagoon scenery and a slower romantic cultural experience.",Italy,,"₹50,000–₹65,000 per person"
-Amalfi Coast,"Best for dramatic coastal scenery, charming villages, boat rides and relaxed Italian meals.",Italy,,"₹55,000–₹70,000 per person"
-Ho Chi Minh City,"A livelier alternative with colonial landmarks, food streets, museums and vibrant evening activity.",Vietnam,,"₹30,000–₹45,000 per person"
-Da Nang,"A good fit for couples wanting a mix of beaches, Vietnamese food, city sightseeing and easy day excursions.",Vietnam,,"₹32,000–₹48,000 per person"
+Singapore,"Excellent for food, shopping and polished city sightseeing, though generally more expensive.",Singapore,Chet_Singh_Ghat_southern_waterfront_2.webp,"₹70,000–₹95,000 per person"
+Bali,"A better fit if beaches, cafés, nightlife and relaxed island time matter more than multiple cities.",Indonesia,Likabali_Likabali_Assam_0.webp,"₹55,000–₹80,000 per person"
+Udaipur and Jodhpur,"A slower Rajasthan heritage alternative with lakes, forts and atmospheric old-city walks.",Rajasthan,Tripurasundari_Shaktipeeth_Matabari_Tripura_0.webp,"₹35,000–₹50,000 per person"
+Lucknow and Ayodhya,"A food-and-heritage route with Nawabi architecture, kebabs and riverside culture.",Uttar Pradesh,Bara_Imambara_Lucknow_Uttar_Pradesh_0.webp,"₹30,000–₹45,000 per person"
+Amritsar and Chandigarh,"A compact heritage and food journey with the Golden Temple, Wagah border and planned-city architecture.",Punjab and Haryana,Sri_Harmandir_Sahib_Amritsar_Punjab_0.webp,"₹28,000–₹42,000 per person"
+Lonavala,"A convenient Pune-side nature escape with waterfalls, viewpoints and scenic monsoon drives.",Maharashtra,lohagad_fort_lonavala_Maharashtra_0.webp,"₹8,000–₹14,000 per person"
+Ranthambore,"Better suited to a nature-first trip, with wildlife safaris, forest landscapes and a historic fort nearby.",Rajasthan,Kachida_Kacheeda_Kalan_Rajasthan_0.webp,"₹22,000–₹35,000 per person"
+Ladakh,"Best for dramatic high-altitude landscapes, monasteries and adventure, though July is much drier there.",Ladakh,Tso_Moriri_ladakh_Ladakh_0.webp,"₹35,000–₹55,000 per person"
+Florence,"A strong alternative for Renaissance art, compact walking routes, museums and Tuscan food over three days.",Italy,Florence_Duomo_Complex_florence_Italy_3.webp,"₹45,000–₹55,000 per person"
+Venice,"Ideal for canals, Gothic architecture, lagoon scenery and a slower romantic cultural experience.",Italy,Grand_Canal_sunset_vaporetto_ride_venice_Italy_1.webp,"₹50,000–₹65,000 per person"
+Amalfi Coast,"Best for dramatic coastal scenery, charming villages, boat rides and relaxed Italian meals.",Italy,Positano_amalfi_coast_Italy_5.webp,"₹55,000–₹70,000 per person"
+Ho Chi Minh City,"A livelier alternative with colonial landmarks, food streets, museums and vibrant evening activity.",Vietnam,Hoan_Kiem_Lake_hanoi_Vietnam_1.webp,"₹30,000–₹45,000 per person"
+Da Nang,"A good fit for couples wanting a mix of beaches, Vietnamese food, city sightseeing and easy day excursions.",Vietnam,Hoan_Kiem_Lake_hanoi_Vietnam_1.webp,"₹32,000–₹48,000 per person"
 Luang Prabang,"A slower, atmospheric Southeast Asian escape with temples, markets, river views and a relaxed pace.",Laos,,"₹35,000–₹52,000 per person"
 Edinburgh,"A strong alternative for couples who prefer concentrated medieval history, a dramatic castle and walkable old streets.","Scotland, UK",,"₹85,000–₹1,25,000 per person"
-Paris,"Combines grand museums, royal history, riverfront walks and excellent dining in a similarly short city break.",France,,"₹1,00,000–₹1,45,000 per person"
+Paris,"Combines grand museums, royal history, riverfront walks and excellent dining in a similarly short city break.",France,Sainte-Chapelle_paris_France_2.webp,"₹1,00,000–₹1,45,000 per person"
 Amsterdam,"Works well for a relaxed European break with museums, canal scenery and compact historic neighbourhoods.",Netherlands,,"₹1,00,000–₹1,40,000 per person"
 Athens,"Another strong history-focused city break with ancient monuments, museums and lively evening neighbourhoods.",Greece,,"₹60,000–₹90,000 per person"
 Istanbul,"A culturally rich short break combining empires, grand monuments, bazaars and vegetarian-friendly food.",Türkiye,,"₹55,000–₹85,000 per person"
-Kyoto,"A deeper traditional-Japan alternative with temples, gardens and refined cuisine.",Japan,,"₹35,000–₹65,000 per person"
+Kyoto,"A deeper traditional-Japan alternative with temples, gardens and refined cuisine.",Japan,Japanese_Bunker_Sri_Vijaya_Puram_Andaman_and_Nicobar_Islands_0.webp,"₹35,000–₹65,000 per person"
 Seoul,"A lively Asian city break combining palaces, food streets, shopping and contemporary culture.",South Korea,,"₹30,000–₹55,000 per person"
-Badami,"A strong alternative for couples who enjoy dramatic cave temples, Chalukyan architecture and a quieter heritage atmosphere.",Karnataka,,"₹10,000–₹14,000 per person"
-Pattadakal,"Ideal for temple architecture and history, with exceptional UNESCO-listed monuments that work well as a short heritage break.",Karnataka,,"₹9,000–₹13,000 per person"
+Badami,"A strong alternative for couples who enjoy dramatic cave temples, Chalukyan architecture and a quieter heritage atmosphere.",Karnataka,Badami_Cave_Temples_Badami_Karnataka_0.webp,"₹10,000–₹14,000 per person"
+Pattadakal,"Ideal for temple architecture and history, with exceptional UNESCO-listed monuments that work well as a short heritage break.",Karnataka,Shri_Virupaksha_Temple__Pattadakallu__Pattadakal_Karnataka_0.webp,"₹9,000–₹13,000 per person"
+Tirthan Valley,"A quieter adventure option with forest walks, riverside stays and village trails.",Himachal Pradesh,,"₹6,500–₹11,000 per person"
+Kochi,"A strong alternative for colonial heritage, old churches, waterfront walks and distinctive vegetarian cuisine.",Kerala,Chinese_Fishing_Nets_Kochi_Kerala_0.webp,"₹10,000–₹17,000 per person"
+Bundi,"A quieter heritage alternative with a beautiful palace, murals, stepwells and a slower small-town rhythm.",Rajasthan,Taragarh_Fort_Bundi_Rajasthan_0.webp,"₹10,000–₹16,000 per person"
+Fort Kochi,"Ideal for Portuguese-era architecture, churches, art spaces and atmospheric waterfront walks.",Kerala,Fort_Kochi_Heritage_Quarter_fort_kochi_Kerala_2.webp,"₹10,000–₹16,000 per person"
+Lucknow,"Fits travellers who enjoy architecture, old-city walks and vegetarian Awadhi food in a slower setting.",Uttar Pradesh,Bara_Imambara_Lucknow_Uttar_Pradesh_0.webp,"₹11,000–₹18,000 per person"
+Gwalior,"A quieter historical alternative with an impressive hilltop fort, palace architecture, and manageable sightseeing.",Madhya Pradesh,Jai_Vilas_Palace_Gwalior_Madhya_Pradesh_0.webp,"₹11,000–₹17,000 per person"
+Pune,"A compact heritage-and-food getaway with forts, cafés and a lively young-city atmosphere.",Maharashtra,OSHO_International_Meditation_Resort_Pune_Maharashtra_0.webp,"₹12,000–₹20,000 per person"
+Ahmedabad,"Excellent architecture, food walks and riverfront sightseeing for a short urban break.",Gujarat,The_Calico_Museum_of_Textiles_Ahmedabad_Gujarat_0.webp,"₹14,000–₹24,000 per person"
+Delhi Mughal Heritage,"A good alternative for Red Fort, Humayun’s Tomb, Jama Masjid and old-city culture in a larger urban setting.",Delhi,India_Gate_New_Delhi_Delhi_0.webp,"₹8,000–₹13,000 per person"
+Jaipur Heritage Circuit,"Fits travellers who enjoy forts, palaces, architecture and colourful local markets, with a broader range of attractions.",Rajasthan,Gagron_Fort_Gagron_Rajasthan_0.webp,"₹9,000–₹15,000 per person"
+Gwalior Fort,"A compact history-focused escape with a magnificent hill fort, old palaces and strong medieval heritage.",Madhya Pradesh,,"₹6,500–₹10,000 per person"
+Thanjavur,"Ideal for South Indian temple architecture, royal history and traditional vegetarian food.",Tamil Nadu,Brihadeeswara_Temple_Thanjavur_Tamil_Nadu_0.webp,"₹8,000–₹14,000 per person"

@@ -70,7 +70,7 @@ def get_similar_places(system):
 
 
 def save_similar_places(system, similar_places):
-    csv_file = 'similar_places.csv'
+    csv_file = os.path.join(_PROJECT_ROOT, 'similar_places.csv')
     try:
         existing_df = pd.read_csv(csv_file)
     except FileNotFoundError:
@@ -83,10 +83,16 @@ def save_similar_places(system, similar_places):
             place['image'] = ''
 
     try:
+        from models.recommendation.image_helpers import get_city_image
         similar_places_df = pd.DataFrame(similar_places)
         similar_places_df['image'] = similar_places_df['image'].fillna('').replace({None: ''})
         new_places_df = similar_places_df[~similar_places_df['placename'].isin(existing_df['placename'])]
         if not new_places_df.empty:
+            # fetch a CDN image for each new city before persisting
+            for idx, row in new_places_df.iterrows():
+                if not str(row.get('image', '')).strip():
+                    img = get_city_image(system, row['placename'], row.get('state', ''))
+                    new_places_df.at[idx, 'image'] = img
             updated_df = pd.concat([existing_df, new_places_df], ignore_index=True)
             updated_df.to_csv(csv_file, index=False)
             update_similar_places(system)
