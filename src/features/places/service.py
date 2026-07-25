@@ -3,11 +3,24 @@ import random
 import re
 import threading
 import collections
+import time
 
 from core.db import new_connection
 
 _city_coords_cache = {}
 _city_coords_loaded = False
+
+# --- result caches ---
+_QUERY_TTL   = 7 * 24 * 60 * 60   # 7 days — effectively "until restart" at low traffic
+_query_cache = {}             # (frozenset|None, int) -> ([rows], expiry_monotonic)
+_query_lock  = threading.Lock()
+
+_CURATED_TTL   = 7 * 24 * 60 * 60
+_curated_cache = {}           # (id(list), n, str|None) -> ([rows], expiry_monotonic)
+_curated_lock  = threading.Lock()
+
+_enrich_cache = None          # dict[city_lower -> enrich_dict] | None (None = not built yet)
+_enrich_lock  = threading.Lock()
 
 # Curated Gen Z popular destinations — aspirational, diverse, all have good data in DB.
 # Randomly sampled each request so the list feels alive without needing real trending data.
@@ -131,6 +144,16 @@ def _city_aggregate_query(city_filter=None, limit=50):
     total_reviews, best_month. image/best_activities are filled in later by
     _attach_images_and_activities().
     """
+    _cache_key = (frozenset(city_filter) if city_filter else None, limit)
+    _now = time.monotonic()
+    _entry = _query_cache.get(_cache_key)
+    if _entry and _now < _entry[1]:
+        return [dict(r) for r in _entry[0]]   # shallow copy: all row values are scalars
+    with _query_lock:
+        _entry = _query_cache.get(_cache_key)
+        if _entry and _now < _entry[1]:
+            return [dict(r) for r in _entry[0]]
+
     placeholders = ','.join(['?' for _ in TOURIST_TYPES])
     params = list(TOURIST_TYPES)
 
@@ -170,7 +193,7 @@ def _city_aggregate_query(city_filter=None, limit=50):
         cursor.close()
         conn.close()
 
-    return [
+    result = [
         {
             'city': r['city'],
             'state': r['state'],
@@ -185,6 +208,8 @@ def _city_aggregate_query(city_filter=None, limit=50):
         }
         for r in rows
     ]
+    _query_cache[_cache_key] = (result, time.monotonic() + _QUERY_TTL)
+    return [dict(r) for r in result]
 
 
 # Scenic types get priority for the city card image — these are the places
@@ -274,17 +299,9 @@ _CITY_IMAGE_OVERRIDE = {
 }
 
 
-def _attach_images_and_activities(city_rows):
-    """Enrich city rows with CSV-sourced image, rating, review_count,
-    famous_places list, and best_activities."""
-    try:
-        from features.itinerary.service import recommender
-        if recommender is None:
-            return city_rows
-        df = recommender.places_df
-    except Exception:
-        return city_rows
-
+def _build_enrich_cache(df) -> dict:
+    """Compute the city-enrichment lookup table from places_df.
+    Called once per process lifetime; result is stored in _enrich_cache."""
     df_valid = df[df['city'].notna()].copy()
     has_img = df_valid[
         df_valid['image'].notna() & (df_valid['image'].astype(str).str.strip() != '')
@@ -398,24 +415,68 @@ def _attach_images_and_activities(city_rows):
 
     img_map_lower.update(_CITY_IMAGE_OVERRIDE)
 
+    all_keys = set(list(rating_map) + list(img_map_lower) + list(vibe_map)
+                   + list(act_map) + list(famous_map))
+    enrich = {}
+    for key in all_keys:
+        enrich[key] = {
+            'image':           img_map_lower.get(key, ''),
+            'vibe':            vibe_map.get(key, ''),
+            'best_activities': act_map.get(key, ''),
+            'famous_places':   famous_map.get(key, []),
+            'avg_rating':      rating_map.get(key),
+            'review_count':    review_map.get(key),
+        }
+    return enrich
+
+
+def _get_enrich_cache():
+    global _enrich_cache
+    if _enrich_cache is not None:       # fast path — no lock needed
+        return _enrich_cache
+    with _enrich_lock:
+        if _enrich_cache is not None:   # double-check under lock
+            return _enrich_cache
+        try:
+            from features.itinerary.service import recommender
+            if recommender is None or recommender.places_df is None:
+                return None             # DF not ready yet; caller degrades gracefully
+            _enrich_cache = _build_enrich_cache(recommender.places_df)
+            print(f"[places] enrichment cache built: {len(_enrich_cache)} cities")
+            return _enrich_cache
+        except Exception as e:
+            print(f"[places] enrichment cache build failed: {e}")
+            return None
+
+
+def _attach_images_and_activities(city_rows):
+    """Enrich city rows with CSV-sourced image, vibe, rating, review_count,
+    famous_places, and best_activities. Uses a process-lifetime cache."""
+    enrich = _get_enrich_cache()
+    if enrich is None:
+        return city_rows              # DF not ready: return undecorated rows
     for row in city_rows:
         key = str(row['city']).lower()
-        row['image'] = img_map_lower.get(key, '')
-        row['vibe'] = vibe_map.get(key, '')
-        row['best_activities'] = act_map.get(key, '')
-        row['famous_places'] = famous_map.get(key, [])
-        # Overwrite DB-aggregated rating/reviews with cleaner CSV values
-        if key in rating_map:
-            row['avg_rating'] = rating_map[key]
-        if key in review_map:
-            row['review_count'] = review_map[key]
-        # Remove internal/redundant fields
+        e = enrich.get(key, {})
+        row['image']           = e.get('image', '')
+        row['vibe']            = e.get('vibe', '')
+        row['best_activities'] = e.get('best_activities', '')
+        row['famous_places']   = list(e.get('famous_places', []))  # copy so callers can't corrupt cache
+        if e.get('avg_rating') is not None:
+            row['avg_rating']  = e['avg_rating']
+        if e.get('review_count') is not None:
+            row['review_count'] = e['review_count']
         row.pop('lat', None)
         row.pop('lon', None)
         row.pop('total_reviews', None)
         row.pop('place_count', None)
-
     return city_rows
+
+
+def warm_enrich_cache():
+    """Called at startup to pre-build the enrichment cache in the background.
+    Runs after initialize_recommender() so places_df is usually ready quickly."""
+    threading.Thread(target=_get_enrich_cache, daemon=True).start()
 
 
 _CITY_PREFIXES = ('new ', 'old ', 'north ', 'south ', 'east ', 'west ', 'greater ')
@@ -470,18 +531,30 @@ def _curated_city_cards(city_state_list, n=10, exclude_city_key=None):
     """Build city cards from a curated (city, state) list by looking up the
     city aggregate from the DB. Returns n randomly sampled entries.
     exclude_city_key: dedup key of user's current city — excluded from results."""
-    pool = city_state_list
-    if exclude_city_key:
-        pool = [(c, s) for c, s in city_state_list
-                if _city_dedup_key(c) != exclude_city_key]
-    sample = random.sample(pool, min(n * 2, len(pool)))
-    city_names = [c.lower() for c, _ in sample]
-    rows = _city_aggregate_query(city_filter=city_names, limit=len(city_names) + 5)
-    rows = _attach_images_and_activities(rows)
-    # Preserve curated order (random.sample order) rather than review-count order.
-    order = {c.lower(): i for i, (c, _) in enumerate(sample)}
-    rows.sort(key=lambda r: order.get(str(r['city']).lower(), 999))
-    return rows[:n]
+    _cache_key = (id(city_state_list), n, exclude_city_key)
+    _entry = _curated_cache.get(_cache_key)
+    if _entry and time.monotonic() < _entry[1]:
+        # with_image_urls() deepcopies before rewriting URLs (images.py:43) — safe to return ref
+        return _entry[0]
+    with _curated_lock:
+        _entry = _curated_cache.get(_cache_key)
+        if _entry and time.monotonic() < _entry[1]:
+            return _entry[0]
+
+        pool = city_state_list
+        if exclude_city_key:
+            pool = [(c, s) for c, s in city_state_list
+                    if _city_dedup_key(c) != exclude_city_key]
+        sample = random.sample(pool, min(n * 2, len(pool)))
+        city_names = [c.lower() for c, _ in sample]
+        rows = _city_aggregate_query(city_filter=city_names, limit=len(city_names) + 5)
+        rows = _attach_images_and_activities(rows)
+        # Preserve curated order (random.sample order) rather than review-count order.
+        order = {c.lower(): i for i, (c, _) in enumerate(sample)}
+        rows.sort(key=lambda r: order.get(str(r['city']).lower(), 999))
+        rows = rows[:n]
+        _curated_cache[_cache_key] = (rows, time.monotonic() + _CURATED_TTL)
+        return rows
 
 
 def _state_diverse(rows, max_per_state=2, total=10):
@@ -509,6 +582,7 @@ def query_trending(lat=None, lon=None):
 
 
 def query_nearby(lat, lon):
+    lat, lon = round(lat, 1), round(lon, 1)   # bucket to ~11km grid for cache sharing
     # Start at 150 km; expand to 250 km if fewer than 5 results (sparse regions).
     # Lower bound 1 km excludes the user's own city (exact match is 0 km).
     # Name-based exclusion also catches spelling variants (e.g. Bengaluru vs Bangalore).
@@ -539,6 +613,7 @@ def query_nearby(lat, lon):
 
 
 def query_weekend(lat, lon):
+    lat, lon = round(lat, 1), round(lon, 1)   # bucket to ~11km grid for cache sharing
     # 150–350 km: far enough to feel like a trip, close enough for a weekend.
     # Name-based exclusion guards against the home city appearing via spelling variants.
     home_key = _city_dedup_key(_nearest_city(lat, lon))

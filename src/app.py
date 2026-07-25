@@ -23,7 +23,7 @@ from auth.guard import authenticate_request
 from features.itinerary import itinerary_bp
 from features.itinerary.service import initialize_recommender, is_initialized
 from features.places import places_bp
-from features.places.service import load_city_coords
+from features.places.service import load_city_coords, warm_enrich_cache
 from features.images import images_bp
 from features.user import user_bp
 from features.weather import weather_bp
@@ -79,6 +79,7 @@ app.register_blueprint(messaging_bp)
 init_db_async()
 initialize_recommender()
 load_city_coords()
+warm_enrich_cache()
 
 # ---------------------------------------------------------------------------
 # Background data-fill cron jobs (APScheduler)
