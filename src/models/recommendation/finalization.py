@@ -1,5 +1,4 @@
 import copy
-import random
 import threading
 import time as _time
 
@@ -308,7 +307,7 @@ def finalize_trip_level(system, itinerary, places):
     placename = itinerary['name']
 
     if placename not in place_image_map:
-        place_image_map[placename] = 'default' + str(random.randint(1, 7)) + '.webp'
+        place_image_map[placename] = None
 
     main_single_image = None
     if placename in place_image_map and pd.notna(place_image_map[placename]):
@@ -332,7 +331,7 @@ def finalize_trip_level(system, itinerary, places):
     for place in similar:
         sp_name = place.get('placename')
         db_img = _img.get_city_image(system, sp_name or '', place.get('state', '')) if sp_name else ''
-        place['image'] = db_img if db_img else 'default' + str(random.randint(1, 7)) + '.webp'
+        place['image'] = db_img if db_img else None
 
     system._place_image_fallback = {
         str(name).strip().lower(): img for name, img in place_image_map.items()
@@ -430,7 +429,7 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
                     if single and not (not isinstance(single, list) and pd.isna(single)):
                         images = [single]
                 if not images:
-                    images = ['default' + str(random.randint(1, 7)) + '.webp']
+                    images = []
                 item['images'] = images
                 if images:
                     resolved_count += 1
