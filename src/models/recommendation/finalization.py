@@ -385,6 +385,40 @@ def _extract_country(places_of_interest):
     return parts[-1] if parts and parts[-1] else None
 
 
+def _trim_last_day_after_checkout(days, user_preferences):
+    """Remove any timeline items that appear after check_out on the last day.
+
+    LLMs reliably respect the check_out time but occasionally keep writing
+    place/meal items after it. This is a deterministic safety net.
+    Only runs when departure is before 3 PM (dep < 15) — later departures
+    may legitimately have activities after check_out for the journey."""
+    if not days or not user_preferences:
+        return
+    dep_str = (user_preferences.get('departure_time') or '').strip()
+    if not dep_str:
+        return
+    import re as _re
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', dep_str.upper())
+    if not m:
+        return
+    dep_h = int(m.group(1))
+    if m.group(3) == 'PM' and dep_h != 12:
+        dep_h += 12
+    elif m.group(3) == 'AM' and dep_h == 12:
+        dep_h = 0
+    if dep_h >= 15:
+        return
+    last_day = days[-1]
+    timeline = last_day.get('timeline', [])
+    checkout_idx = next(
+        (i for i, item in enumerate(timeline)
+         if item.get('type') == 'hotel' and item.get('event') == 'check_out'),
+        None
+    )
+    if checkout_idx is not None and checkout_idx < len(timeline) - 1:
+        last_day['timeline'] = timeline[:checkout_idx + 1]
+
+
 def finalize_days(system, itinerary, days, places, start_date=None, start_day_index=0,
                   user_preferences=None):
     fallback_map = getattr(system, '_place_image_fallback', {}) or {}
@@ -418,6 +452,7 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
         lf_update_span(output={"resolved_count": resolved_count})
 
     _sort_timeline_by_time(days)
+    _trim_last_day_after_checkout(days, user_preferences)
 
     city = itinerary.get('city')
     ctx = {

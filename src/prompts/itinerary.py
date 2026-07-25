@@ -1,4 +1,36 @@
+import re as _re
 from prompts.constants import BUDGET_TIER_MAP, MEAL_COST_CAPS, FULL_TIER_TABLE
+
+
+def _parse_hour(time_str: str):
+    s = (time_str or '').strip().upper()
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    if not m:
+        return None
+    h = int(m.group(1))
+    if m.group(3) == 'PM' and h != 12:
+        h += 12
+    elif m.group(3) == 'AM' and h == 12:
+        h = 0
+    return h if 0 <= h <= 23 else None
+
+
+def _parse_minute(time_str: str) -> int:
+    s = (time_str or '').strip().upper()
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    return int(m.group(2)) if m and m.group(2) else 0
+
+
+def _checkout_deadline(dep_hour: int, dep_minute: int = 0, buffer_mins: int = 90) -> str:
+    """Subtract buffer from departure time and return a human clock string like '11:30 AM'."""
+    total = dep_hour * 60 + dep_minute - buffer_mins
+    if total < 0:
+        total = 0
+    h, mn = divmod(total, 60)
+    suffix = "AM" if h < 12 else "PM"
+    display_h = h if 1 <= h <= 12 else (12 if h == 0 else h - 12)
+    return f"{display_h}:{mn:02d} {suffix}"
+
 
 # Pre-computed at import time — one static string per tier.
 # This guarantees identical byte sequences across all requests on the same tier,
@@ -134,26 +166,98 @@ def generate_travel_itinerary_prompt(user_preferences, top_places, top_restauran
     hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
     arrival_time = user_preferences.get('arrival_time', '').strip()
     departure_time = user_preferences.get('departure_time', '').strip()
+    arr_hour = _parse_hour(arrival_time)
+    dep_hour = _parse_hour(departure_time)
+    dep_minute = _parse_minute(departure_time) if departure_time else 0
 
     arrival_block = ""
     if arrival_time:
-        arrival_block = f"""
-## ARRIVAL / DEPARTURE — smart planner context
-- User arrives on Day 1 at {arrival_time}. Hotels typically allow check-in at 10–11 AM. Think like a human traveller:
-  - **Very early arrival (before 7 AM):** The traveller is exhausted from an overnight journey. Bag-drop at the hotel on arrival (mark as `event: "check_in"`, note it as bag-drop). They then REST/SLEEP until ~8:00–9:00 AM. Do NOT schedule any activity, place visit, or sightseeing before 8 AM. Do NOT suggest a pre-breakfast activity. After resting, breakfast MUST appear at ~8:30 AM (a `type: "meal", slot: "breakfast"` timeline item). Proper check-in follows at ~10:00–11:00 AM (a second `event: "check_in"` item). Sightseeing starts after proper check-in.
-  - **Morning arrival (7 AM – 10 AM):** Bag-drop at hotel, have breakfast nearby, then explore. Room may be ready by the time they return from the first activity.
-  - **Midday arrival (10 AM – 1 PM):** Check-in properly (room likely ready), freshen up, then head out for lunch + afternoon sightseeing.
-  - **Afternoon arrival (after 1 PM):** Have lunch on the way or near the hotel, check in, then explore in the evening.
-  - First timeline item on Day 1 is always the hotel check_in or bag-drop — travel_from_prev is null.
-"""
-    if departure_time:
-        arrival_block += f"""- User departs on the LAST day at {departure_time}. Work backwards:
-  - Leave 60–90 min buffer for travel to airport/station + 20–30 min packing.
-  - Add hotel check_out before the last sightseeing block.
-  - Never over-schedule the last day — only activities that genuinely fit before departure.
-  - Dinner on the last day: include it only if time genuinely allows before the travel buffer. If not, skip it and add a `note` on the last timeline item: "Heading home — grab a quick bite near the station/airport."
-- Sunrise on Day 2+: if Day 1 arrival blocks a pre-dawn visit, check whether the destination has a world-famous sunrise experience (e.g. Taj Mahal, Varanasi ghats, Jaisalmer fort, Ranthambore). If yes and Day 2 has no early constraint, schedule that sunrise visit on Day 2 before breakfast (~5:00–6:30 AM).
-"""
+        if arr_hour is not None and arr_hour >= 10:
+            if arr_hour >= 20:
+                # Very late night — no activities at all on Day 1
+                arrival_block = (
+                    f"**Day 1 late-night arrival at {arrival_time} — overrides Rule 4b for Day 1 only:** "
+                    f"Do NOT add breakfast, lunch, or any place/activity to the Day 1 timeline. "
+                    f"Omit breakfast and lunch from `meal_options` for Day 1 — `meal_options` for Day 1 must only have 'dinner' key. "
+                    f"The ONLY items on Day 1: hotel check_in at {arrival_time} (first item, travel_from_prev: null), then optionally a quick dinner if nearby. "
+                    f"No sightseeing, no place visits on Day 1 — the user is arriving very late.\n"
+                )
+            elif arr_hour >= 14:
+                skip, first = "breakfast and lunch", "dinner"
+                arrival_block = (
+                    f"**Day 1 arrival at {arrival_time} — overrides Rule 4b for Day 1 only:** "
+                    f"Do NOT add {skip} to the Day 1 timeline or `meal_options`. "
+                    f"First meal on Day 1 is {first}. "
+                    f"First timeline item: hotel check_in at {arrival_time} (travel_from_prev: null). "
+                    f"No activities scheduled before {arrival_time}.\n"
+                )
+            else:
+                skip, first = "breakfast", "lunch"
+                arrival_block = (
+                    f"**Day 1 arrival at {arrival_time} — overrides Rule 4b for Day 1 only:** "
+                    f"Do NOT add {skip} to the Day 1 timeline or `meal_options`. "
+                    f"First meal on Day 1 is {first}. "
+                    f"First timeline item: hotel check_in at {arrival_time} (travel_from_prev: null). "
+                    f"No activities scheduled before {arrival_time}.\n"
+                )
+        elif arr_hour is not None and arr_hour < 7:
+            arrival_block = (
+                f"**Day 1 very early arrival at {arrival_time}:** "
+                f"Bag-drop at hotel on arrival (check_in, note as bag-drop). "
+                f"REST until ~8:00–9:00 AM — no activity or sightseeing before 8 AM. "
+                f"Breakfast at ~8:30 AM (timeline item). Proper check-in at ~10:00–11:00 AM (second check_in item). "
+                f"First timeline item: hotel check_in at {arrival_time}, travel_from_prev: null.\n"
+            )
+        else:
+            arrival_block = (
+                f"**Day 1 morning arrival at {arrival_time}:** "
+                f"Bag-drop at hotel, breakfast nearby, then explore. "
+                f"First timeline item: hotel check_in at {arrival_time}, travel_from_prev: null.\n"
+            )
+
+    if departure_time and dep_hour is not None:
+        latest_co = _checkout_deadline(dep_hour, dep_minute)
+        if dep_hour < 9:
+            arrival_block += (
+                f"**Last day early departure at {departure_time} — hard rules:** "
+                f"Do NOT add any place visits, meals, or activities on the last day. "
+                f"The ONLY item on the last day is hotel check_out — it MUST be by {latest_co}. "
+                f"Note on the check_out item: 'Early departure — grab something at the airport/station.'\n"
+            )
+        elif dep_hour < 12:
+            arrival_block += (
+                f"**Last day departure at {departure_time} — hard rules:** "
+                f"Skip lunch and dinner from the last-day timeline. "
+                f"Hotel check_out MUST be by {latest_co}. "
+                f"The check_out object is the LAST element in the last day's `timeline` array. "
+                f"After writing check_out, close the timeline array immediately: `...check_out item` ]. "
+                f"Do NOT write any place, meal, or activity JSON object after check_out. "
+                f"Last day order: breakfast → at most 1 short activity → check_out (array ends). "
+                f"Note on the check_out item: 'Heading home after a quick morning.'\n"
+            )
+        elif dep_hour < 15:
+            arrival_block += (
+                f"**Last day departure at {departure_time} — hard rules:** "
+                f"Skip dinner from the last-day timeline. "
+                f"Hotel check_out MUST be by {latest_co}. "
+                f"The check_out object is the LAST element in the last day's `timeline` array. "
+                f"After writing check_out, close the timeline array immediately: `...check_out item` ]. "
+                f"Do NOT write any place, meal, or activity JSON object after check_out. "
+                f"Note on the check_out item: 'Heading home — grab a quick bite near the station/airport.'\n"
+            )
+        else:
+            arrival_block += (
+                f"**Last day departure at {departure_time} — hard rules:** "
+                f"Hotel check_out MUST be by {latest_co}. Do NOT schedule any activity or meal ending after {latest_co}. "
+                f"hotel check_out is the LAST hotel item — nothing scheduled after the departure buffer. "
+                f"Include dinner only if it genuinely ends before {latest_co}. "
+                f"Note on last timeline item if dinner is skipped: 'Heading home — grab a quick bite near the station/airport.'\n"
+            )
+    elif departure_time:
+        arrival_block += (
+            f"**Last day departure at {departure_time}:** "
+            f"Add hotel check_out, don't over-schedule the last day.\n"
+        )
 
     caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
     b_cap, l_cap, d_cap = caps
@@ -221,11 +325,20 @@ Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration
 
 """
 
+    checkout_verify = ""
+    if departure_time and dep_hour is not None and dep_hour < 15:
+        latest_co = _checkout_deadline(dep_hour, dep_minute)
+        checkout_verify = (
+            f" Also verify: does day {trip_duration}'s timeline array end with the hotel check_out item "
+            f"(by {latest_co}) and nothing after it? If not, remove all items after check_out."
+        )
+
     user_content += (
         f"\n\nBefore you output the JSON, silently verify: does your `itinerary` array "
         f"have exactly {trip_duration} day objects? "
         f"If it has fewer, add the missing days before outputting. "
         f"A response with fewer than {trip_duration} days is incomplete and unusable."
+        f"{checkout_verify}"
     )
 
     return [

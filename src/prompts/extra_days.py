@@ -1,4 +1,35 @@
+import re as _re
 from prompts.constants import BUDGET_TIER_MAP, MEAL_COST_CAPS, MEAL_TIER_TABLE
+
+
+def _parse_hour(time_str: str):
+    s = (time_str or '').strip().upper()
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    if not m:
+        return None
+    h = int(m.group(1))
+    if m.group(3) == 'PM' and h != 12:
+        h += 12
+    elif m.group(3) == 'AM' and h == 12:
+        h = 0
+    return h if 0 <= h <= 23 else None
+
+
+def _parse_minute(time_str: str) -> int:
+    s = (time_str or '').strip().upper()
+    m = _re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$', s)
+    return int(m.group(2)) if m and m.group(2) else 0
+
+
+def _checkout_deadline(dep_hour: int, dep_minute: int = 0, buffer_mins: int = 90) -> str:
+    total = dep_hour * 60 + dep_minute - buffer_mins
+    if total < 0:
+        total = 0
+    h, mn = divmod(total, 60)
+    suffix = "AM" if h < 12 else "PM"
+    display_h = h if 1 <= h <= 12 else (12 if h == 0 else h - 12)
+    return f"{display_h}:{mn:02d} {suffix}"
+
 
 # Pre-computed at import time — one static string per tier.
 # Keeps the system prefix identical across all requests on the same tier,
@@ -67,16 +98,102 @@ def generate_extra_days_prompt(user_preferences, top_places, top_restaurants, to
     _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
     hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
     departure_time = user_preferences.get('departure_time', '').strip()
+    arrival_time = user_preferences.get('arrival_time', '').strip()
     trip_duration = user_preferences.get('trip_duration', num_days)
+    arr_hour = _parse_hour(arrival_time)
+    dep_hour = _parse_hour(departure_time)
+    dep_minute = _parse_minute(departure_time) if departure_time else 0
 
     arrival_block = ""
+
+    # Day 1 arrival context (streaming path gap fix)
+    if start_day == 1 and arrival_time and arr_hour is not None and arr_hour >= 10:
+        if arr_hour >= 20:
+            arrival_block += (
+                f"**Day 1 late-night arrival at {arrival_time} — overrides Rule 3b for Day 1 only:** "
+                f"Do NOT add breakfast, lunch, or any place/activity to Day 1 timeline. "
+                f"Omit breakfast and lunch from `meal_options` for Day 1 — only 'dinner' key allowed. "
+                f"Day 1 only: hotel check_in at {arrival_time} (first item, travel_from_prev: null), then optionally a quick dinner if nearby. "
+                f"No sightseeing or place visits on Day 1.\n"
+            )
+        elif arr_hour >= 14:
+            skip, first = "breakfast and lunch", "dinner"
+            arrival_block += (
+                f"**Day 1 arrival at {arrival_time} — overrides Rule 3b for Day 1 only:** "
+                f"Do NOT add {skip} to Day 1 timeline or `meal_options`. "
+                f"First meal is {first}. "
+                f"First timeline item: hotel check_in at {arrival_time} (travel_from_prev: null). "
+                f"No activities before {arrival_time}.\n"
+            )
+        else:
+            skip, first = "breakfast", "lunch"
+            arrival_block += (
+                f"**Day 1 arrival at {arrival_time} — overrides Rule 3b for Day 1 only:** "
+                f"Do NOT add {skip} to Day 1 timeline or `meal_options`. "
+                f"First meal is {first}. "
+                f"First timeline item: hotel check_in at {arrival_time} (travel_from_prev: null). "
+                f"No activities before {arrival_time}.\n"
+            )
+
+    # Departure context for the last day
     if departure_time and (start_day + num_days - 1) >= int(trip_duration):
-        arrival_block = (
-            f"\n## DEPARTURE CONTEXT\n"
-            f"- User departs on Day {trip_duration} at {departure_time}. Work backwards: 60–90 min travel buffer + 20–30 min packing.\n"
-            f"- Add hotel check_out before the final activities.\n"
-            f"- Dinner on the last day: include only if time genuinely allows before the travel buffer. If not, skip it and add a note: \"Heading home — grab a quick bite near the station/airport.\"\n"
-        )
+        if dep_hour is not None:
+            latest_co = _checkout_deadline(dep_hour, dep_minute)
+            if dep_hour < 9:
+                arrival_block += (
+                    f"**Last day early departure at {departure_time} — hard rules:** "
+                    f"Do NOT add any place visits, meals, or activities on the last day. "
+                    f"The ONLY item on the last day is hotel check_out — it MUST be by {latest_co}. "
+                    f"Note on the check_out item: 'Early departure — grab something at the airport/station.'\n"
+                )
+            elif dep_hour < 12:
+                arrival_block += (
+                    f"**Last day departure at {departure_time} — hard rules:** "
+                    f"Skip lunch and dinner from the last-day timeline. "
+                    f"Hotel check_out MUST be by {latest_co}. "
+                    f"The check_out object is the LAST element in the last day's `timeline` array. "
+                    f"After writing check_out, close the timeline array immediately: `...check_out item` ]. "
+                    f"Do NOT write any place, meal, or activity JSON object after check_out. "
+                    f"Last day order: breakfast → at most 1 short activity → check_out (array ends). "
+                    f"Note on the check_out item: 'Heading home after a quick morning.'\n"
+                )
+            elif dep_hour < 15:
+                arrival_block += (
+                    f"**Last day departure at {departure_time} — hard rules:** "
+                    f"Skip dinner from the last-day timeline. "
+                    f"Hotel check_out MUST be by {latest_co}. "
+                    f"The check_out object is the LAST element in the last day's `timeline` array. "
+                    f"After writing check_out, close the timeline array immediately: `...check_out item` ]. "
+                    f"Do NOT write any place, meal, or activity JSON object after check_out. "
+                    f"Note on the check_out item: 'Heading home — grab a quick bite near the station/airport.'\n"
+                )
+            else:
+                arrival_block += (
+                    f"**Last day departure at {departure_time} — hard rules:** "
+                    f"Hotel check_out MUST be by {latest_co}. Do NOT schedule any activity or meal ending after {latest_co}. "
+                    f"hotel check_out is the LAST hotel item — nothing scheduled after the departure buffer. "
+                    f"Include dinner only if it genuinely ends before {latest_co}. "
+                    f"Note on last timeline item if dinner is skipped: 'Heading home — grab a quick bite near the station/airport.'\n"
+                )
+        else:
+            arrival_block += (
+                f"**Last day departure at {departure_time}:** "
+                f"Add hotel check_out, don't over-schedule the last day.\n"
+            )
+
+    # Build output format example: Day 1 starts with hotel check_in; other days start with breakfast.
+    if start_day == 1:
+        _day1_timeline_example = """\
+      {"type": "hotel", "event": "check_in", "name": "Hotel Name", "suggested_time": "11:00 AM", "duration": "15 mins", "travel_from_prev": null, "note": "Check in and freshen up"},
+      {"type": "place", "name": "Place Name", "location": "City, State", "reason": "why it fits", "activities": ["Activity 1"], "rating": "4.3", "opening_hours": "9:00 AM – 6:00 PM", "duration": "1.5–2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {"duration_mins": 20, "mode": "cab", "note": "~20 min cab from hotel"}},
+      {"type": "meal", "slot": "lunch", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area Name", "near_place": "Closest place", "reason": "Great local spot", "suggested_time": "1:30 PM", "duration": "45–60 mins", "travel_from_prev": {"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}},
+      {"type": "meal", "slot": "dinner", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area Name", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60 mins", "travel_from_prev": {"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}"""
+    else:
+        _day1_timeline_example = """\
+      {"type": "meal", "slot": "breakfast", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹150–₹250", "rating": "4.1", "location": "Area Name", "near_place": "First place of the day", "reason": "Quick breakfast before heading out", "suggested_time": "8:00 AM", "duration": "30–45 mins", "travel_from_prev": null},
+      {"type": "place", "name": "Place Name", "location": "City, State", "reason": "why it fits", "activities": ["Activity 1"], "rating": "4.3", "opening_hours": "9:00 AM – 6:00 PM", "duration": "1.5–2 hours", "suggested_time": "9:00 AM", "travel_from_prev": {"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}},
+      {"type": "meal", "slot": "lunch", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area Name", "near_place": "Closest place at midday", "reason": "Good spot near your midday stop", "suggested_time": "1:00 PM", "duration": "45–60 mins", "travel_from_prev": {"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}},
+      {"type": "meal", "slot": "dinner", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area Name", "near_place": "Last place of the day", "reason": "Relaxed dinner to end the day", "suggested_time": "8:00 PM", "duration": "60–90 mins", "travel_from_prev": {"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}"""
 
     caps = MEAL_COST_CAPS.get(hotel_pref, (200, 350, 400))
     b_cap, l_cap, d_cap = caps
@@ -135,60 +252,7 @@ Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} t
     "theme": "Short day theme",
     "day_summary": "One-line summary of the day's flow",
     "timeline": [
-      {{
-        "type": "meal",
-        "slot": "breakfast",
-        "name": "Restaurant Name",
-        "cuisine": "Cuisine Type",
-        "approx_cost": "₹150–₹250",
-        "rating": "4.1",
-        "location": "Area Name",
-        "near_place": "First place of the day",
-        "reason": "Quick breakfast before heading out",
-        "suggested_time": "8:00 AM",
-        "duration": "30–45 mins",
-        "travel_from_prev": null
-      }},
-      {{
-        "type": "place",
-        "name": "Place Name",
-        "location": "City, State",
-        "reason": "why it fits",
-        "activities": ["Activity 1"],
-        "rating": "4.3",
-        "opening_hours": "9:00 AM – 6:00 PM",
-        "duration": "1.5–2 hours",
-        "suggested_time": "9:00 AM",
-        "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}
-      }},
-      {{
-        "type": "meal",
-        "slot": "lunch",
-        "name": "Restaurant Name",
-        "cuisine": "Cuisine Type",
-        "approx_cost": "₹400–₹600",
-        "rating": "4.2",
-        "location": "Area Name",
-        "near_place": "Closest place at midday",
-        "reason": "Good spot near your midday stop",
-        "suggested_time": "1:00 PM",
-        "duration": "45–60 mins",
-        "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}
-      }},
-      {{
-        "type": "meal",
-        "slot": "dinner",
-        "name": "Restaurant Name",
-        "cuisine": "Cuisine Type",
-        "approx_cost": "₹500–₹800",
-        "rating": "4.3",
-        "location": "Area Name",
-        "near_place": "Last place of the day",
-        "reason": "Relaxed dinner to end the day",
-        "suggested_time": "8:00 PM",
-        "duration": "60–90 mins",
-        "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}
-      }}
+{_day1_timeline_example}
     ],
     "meal_options": {{
       "breakfast": [
@@ -223,7 +287,17 @@ Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} t
   }}''' if num_days > 1 else ''}
 ]}}
 """
+    last_day_num = start_day + num_days - 1
+    checkout_verify = ""
+    if departure_time and dep_hour is not None and dep_hour < 15 and last_day_num >= int(trip_duration):
+        latest_co = _checkout_deadline(dep_hour, dep_minute)
+        checkout_verify = (
+            f"\n\nBefore outputting, verify: does day {last_day_num}'s timeline array end with the "
+            f"hotel check_out item (by {latest_co}) and nothing after it? "
+            f"If not, remove all items after check_out."
+        )
+
     return [
         {"role": "system", "content": _SYSTEM[hotel_pref]},
-        {"role": "user",   "content": user_content},
+        {"role": "user",   "content": user_content + checkout_verify},
     ]
