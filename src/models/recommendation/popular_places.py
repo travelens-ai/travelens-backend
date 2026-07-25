@@ -6,20 +6,11 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 
 def schedule_similar_places(system):
-    update_similar_places(system)
+    pass  # no-op — similar_places now lives in DB, no pkl warmup needed
 
 
 def update_similar_places(system):
-    try:
-        similar_places_df = pd.read_csv(os.path.join(_PROJECT_ROOT, 'similar_places.csv'))
-        final_places = {}
-        for row in similar_places_df.itertuples(index=False):
-            final_places[row.placename] = row._asdict()
-        with open(os.path.join(_PROJECT_ROOT, 'similar_places.pkl'), 'wb') as f:
-            pickle.dump(final_places, f)
-        print("similar_places.pkl generated or updated successfully.")
-    except Exception as e:
-        print(f"Error generating or updating similar_places.pkl: {str(e)}")
+    pass  # no-op — kept for any remaining call sites; DB is source of truth now
 
 
 def schedule_popular_destination(system):
@@ -56,47 +47,63 @@ def get_popular_destination(system):
 
 
 def get_similar_places(system):
+    """Return {city_name: {description, price_range}} from DB."""
     try:
-        path = os.path.join(_PROJECT_ROOT, 'similar_places.pkl')
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            with open(path, 'rb') as f:
-                return pickle.load(f)
-        else:
-            print("similar_places.pkl is missing or empty.")
-            return {}
-    except FileNotFoundError:
-        print("No popular destination found. Please run set_popular_destination() first.")
-        return None
+        from core.db import fetch_dicts
+        rows = fetch_dicts(
+            "SELECT c.name AS placename, sp.description, sp.price_range "
+            "FROM similar_places sp JOIN cities c ON sp.city_id = c.id"
+        )
+        return {r["placename"]: r for r in rows}
+    except Exception as e:
+        print(f"[get_similar_places] DB error: {e}")
+        return {}
 
 
 def save_similar_places(system, similar_places):
-    csv_file = os.path.join(_PROJECT_ROOT, 'similar_places.csv')
+    """Upsert LLM-generated similar places into the DB, deduplicating via city_id."""
     try:
-        existing_df = pd.read_csv(csv_file)
-    except FileNotFoundError:
-        existing_df = pd.DataFrame(
-            columns=['placename', 'description', 'state', 'image', 'price_estimated_range']
-        )
+        from core.db import new_connection
+        from models.recommendation.image_helpers import _candidate_city_keys
+        conn = new_connection()
+        cursor = conn.cursor()
+        inserted = 0
+        for place in similar_places:
+            placename = str(place.get('placename') or '').strip()
+            if not placename:
+                continue
+            description = str(place.get('description') or '').strip() or None
+            price_range = str(place.get('price_estimated_range') or '').strip() or None
 
-    for place in similar_places:
-        if place['placename'] not in existing_df['placename'].values or not place.get('image'):
-            place['image'] = ''
+            # Resolve to a canonical city_id
+            city_id = None
+            for key in _candidate_city_keys(placename):
+                cursor.execute("SELECT id FROM cities WHERE LOWER(name) = LOWER(?)", (key,))
+                row = cursor.fetchone()
+                if row:
+                    city_id = row[0]
+                    break
 
-    try:
-        from models.recommendation.image_helpers import get_city_image
-        similar_places_df = pd.DataFrame(similar_places)
-        similar_places_df['image'] = similar_places_df['image'].fillna('').replace({None: ''})
-        new_places_df = similar_places_df[~similar_places_df['placename'].isin(existing_df['placename'])]
-        if not new_places_df.empty:
-            # fetch a CDN image for each new city before persisting
-            for idx, row in new_places_df.iterrows():
-                if not str(row.get('image', '')).strip():
-                    img = get_city_image(system, row['placename'], row.get('state', ''))
-                    new_places_df.at[idx, 'image'] = img
-            updated_df = pd.concat([existing_df, new_places_df], ignore_index=True)
-            updated_df.to_csv(csv_file, index=False)
-            update_similar_places(system)
-        else:
-            print("No new similar places to update.")
+            if city_id is None:
+                continue  # compound/international name — can't deduplicate, skip
+
+            cursor.execute(
+                """
+                MERGE similar_places AS tgt
+                USING (SELECT ? AS city_id) AS src ON tgt.city_id = src.city_id
+                WHEN NOT MATCHED THEN
+                    INSERT (city_id, description, price_range)
+                    VALUES (?, ?, ?);
+                """,
+                (city_id, city_id, description, price_range),
+            )
+            if cursor.rowcount:
+                inserted += 1
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        if inserted:
+            print(f"[save_similar_places] inserted {inserted} new cities.")
     except Exception as e:
-        print(f"Error saving similar places to CSV: {str(e)}")
+        print(f"[save_similar_places] error: {e}")

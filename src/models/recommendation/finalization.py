@@ -1,6 +1,4 @@
 import copy
-import os
-import pickle
 import random
 import threading
 import time as _time
@@ -13,7 +11,6 @@ from models.recommendation import image_helpers as _img
 from models.recommendation import db_persistence as _dbp
 from models.recommendation.langfuse_helpers import lf_span, lf_update_span
 
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 # Circuit-breaker: skip DB lat/lon lookups for 30s after a connection failure.
 _db_lat_long_dead_until = 0.0
@@ -310,14 +307,6 @@ def finalize_trip_level(system, itinerary, places):
 
     placename = itinerary['name']
 
-    try:
-        with open(os.path.join(_PROJECT_ROOT, 'similar_places.pkl'), 'rb') as f:
-            similar_places_data = pickle.load(f)
-    except FileNotFoundError:
-        similar_places_data = {}
-
-    if placename not in place_image_map and placename in similar_places_data:
-        place_image_map[placename] = similar_places_data.get(placename).get('image')
     if placename not in place_image_map:
         place_image_map[placename] = 'default' + str(random.randint(1, 7)) + '.webp'
 
@@ -342,14 +331,8 @@ def finalize_trip_level(system, itinerary, places):
     threading.Thread(target=system.save_similar_places, args=(similar,), daemon=True).start()
     for place in similar:
         sp_name = place.get('placename')
-        matching_place = similar_places_data.get(sp_name) if sp_name else None
-        img = matching_place.get('image') if matching_place else None
-        if img and pd.notna(img) and str(img).strip():
-            place['image'] = img
-        else:
-            # pkl has no image — query DB live so this response gets a real image
-            db_img = _img.get_city_image(system, sp_name or '', place.get('state', '')) if sp_name else ''
-            place['image'] = db_img if db_img else 'default' + str(random.randint(1, 7)) + '.webp'
+        db_img = _img.get_city_image(system, sp_name or '', place.get('state', '')) if sp_name else ''
+        place['image'] = db_img if db_img else 'default' + str(random.randint(1, 7)) + '.webp'
 
     system._place_image_fallback = {
         str(name).strip().lower(): img for name, img in place_image_map.items()
