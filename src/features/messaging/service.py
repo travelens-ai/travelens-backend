@@ -49,6 +49,38 @@ def save_token(*, device_id, fcm_token, user_id=None):
         conn.close()
 
 
+def list_tokens():
+    """Return all device-token registrations as a list of dicts with device_id
+    and user_id (and timestamps) — the fcm_token value itself is deliberately
+    omitted. Returns (rows, (status, message, code))."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT id, device_id, user_id, created_at, updated_at
+            FROM device_tokens
+            ORDER BY updated_at DESC
+            """
+        )
+        rows = [
+            {
+                "id": int(r[0]),
+                "device_id": r[1],
+                "user_id": r[2],
+                "created_at": r[3].isoformat() if r[3] is not None else None,
+                "updated_at": r[4].isoformat() if r[4] is not None else None,
+            }
+            for r in cursor.fetchall()
+        ]
+        return rows, ("success", "Tokens fetched", 200)
+    except Exception as e:
+        return None, ("error", str(e), 500)
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def update_user_id(*, device_id, user_id):
     """Set the user_id on a device's token row(s) — typically when a device-only
     registration (user_id NULL) is claimed after the user logs in. Returns

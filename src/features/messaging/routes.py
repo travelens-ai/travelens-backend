@@ -69,6 +69,24 @@ def register_token():
     return jsonify({"status": status, "message": msg}), code
 
 
+@messaging_bp.route("/messaging", methods=["GET"])
+def list_tokens():
+    """Fetch all device-token registrations (device_id + user_id, no token value)
+    ---
+    tags:
+      - Messaging
+    responses:
+      200:
+        description: List of device-token registrations
+      500:
+        description: Server error
+    """
+    rows, (status, msg, code) = service.list_tokens()
+    if rows is not None:
+        return jsonify({"status": status, "message": msg, "data": rows}), code
+    return jsonify({"status": status, "message": msg}), code
+
+
 @messaging_bp.route("/messaging", methods=["PUT"])
 def update_token_user():
     """Attach a user_id to a device's push token after login
