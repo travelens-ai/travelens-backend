@@ -172,8 +172,32 @@ APP_CONFIG = {
         {"name": "Profile", "icon": "person"},
     ],
     "itinerary": {
-        "type": "stream" 
+        "type": "stream"
     },
+    # Rotating labels shown on the itinerary-generation loader. The client cycles
+    # through these while the itinerary streams.
+    "itinerary_loader_labels": [
+        {"title": "Curating your dream journey...", "subTitle": "Powered by AI magic"},
+        {"title": "Mapping your perfect route...", "subTitle": "Powered by AI magic"},
+        {"title": "Handpicking must-see places...", "subTitle": "Powered by AI magic"},
+        {"title": "Finding hidden gems for you...", "subTitle": "Powered by AI magic"},
+        {"title": "Planning day-by-day adventures...", "subTitle": "Powered by AI magic"},
+        {"title": "Booking the best experiences...", "subTitle": "Powered by AI magic"},
+        {"title": "Discovering local flavors...", "subTitle": "Powered by AI magic"},
+        {"title": "Pairing stays with your vibe...", "subTitle": "Powered by AI magic"},
+        {"title": "Balancing your itinerary...", "subTitle": "Powered by AI magic"},
+        {"title": "Optimizing travel times...", "subTitle": "Powered by AI magic"},
+        {"title": "Sprinkling in some surprises...", "subTitle": "Powered by AI magic"},
+        {"title": "Tailoring trips to your taste...", "subTitle": "Powered by AI magic"},
+        {"title": "Scouting the finest spots...", "subTitle": "Powered by AI magic"},
+        {"title": "Crafting unforgettable moments...", "subTitle": "Powered by AI magic"},
+        {"title": "Aligning stars for your trip...", "subTitle": "Powered by AI magic"},
+        {"title": "Matching places to your mood...", "subTitle": "Powered by AI magic"},
+        {"title": "Weaving your travel story...", "subTitle": "Powered by AI magic"},
+        {"title": "Adding a dash of adventure...", "subTitle": "Powered by AI magic"},
+        {"title": "Fine-tuning every detail...", "subTitle": "Powered by AI magic"},
+        {"title": "Almost ready to explore...", "subTitle": "Powered by AI magic"},
+    ],
 }
 
 
