@@ -263,6 +263,8 @@ def _build_config():
     popular_states = with_image_urls(popular_states)
     config["popular_states"] = interleave_ads(popular_states, "popular_states")
     config["popular_states_ads"] = get_inline_ads_config("popular_states")
+    # Single ad shown on the loader/generating screen.
+    config["loader_ad"] = get_inline_ads_config("loader").get("loader")
     config["ads"] = get_ads_config()
     return config
 

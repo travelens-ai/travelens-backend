@@ -58,6 +58,15 @@ INLINE_ADS = {
         "height": 100,
         "every": 1,
     },
+    # Loader screen — a single ad shown while content (e.g. an itinerary) is
+    # being generated. Not a list, so `every` is unused; served as one slot.
+    "loader": {
+        "adunit": "ca-app-pub-3940256099942544/6300978111",
+        "adtype": "native",
+        "width": 320,
+        "height": 250,
+        "every": 1,
+    },
     # Example self-served direct ad — image creative with a click-through URL.
     "sponsored": {
         "adtype": "direct",
