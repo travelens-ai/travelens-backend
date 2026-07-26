@@ -657,28 +657,35 @@ def query_popular_states(limit=10):
             }
             for r in cursor.fetchall()
         ]
-        # Attach a representative image per state via the real relationship
-        # (images -> place_image_map -> places -> cities -> states), picking the
-        # image of the highest-rated place in that state. This avoids the
-        # false positives of substring-matching image_name (e.g. "Manipur"
-        # matching "Mukutmanipur").
-        for state in states:
+        # Fetch the best image for all states in a single query using a CTE with
+        # ROW_NUMBER — avoids the N+1 pattern (1 query per state) from the old loop.
+        state_ids = [s["id"] for s in states]
+        image_map = {}
+        if state_ids:
+            placeholders = ",".join("?" * len(state_ids))
             try:
                 cursor.execute(
-                    "SELECT TOP 1 i.image_name "
-                    "FROM images i "
-                    "JOIN place_image_map pim ON pim.image_id = i.id "
-                    "JOIN places p ON pim.place_id = p.id "
-                    "JOIN cities c ON p.city_id = c.id "
-                    "WHERE c.state_id = ? "
-                    "ORDER BY p.num_ratings DESC, i.id",
-                    (state["id"],),
+                    f"WITH ranked AS ("
+                    f"  SELECT c.state_id, i.image_name,"
+                    f"         ROW_NUMBER() OVER ("
+                    f"           PARTITION BY c.state_id"
+                    f"           ORDER BY p.num_ratings DESC, i.id"
+                    f"         ) AS rn"
+                    f"  FROM images i"
+                    f"  JOIN place_image_map pim ON pim.image_id = i.id"
+                    f"  JOIN places p            ON pim.place_id  = p.id"
+                    f"  JOIN cities c            ON p.city_id     = c.id"
+                    f"  WHERE c.state_id IN ({placeholders})"
+                    f")"
+                    f"SELECT state_id, image_name FROM ranked WHERE rn = 1",
+                    state_ids,
                 )
-                row = cursor.fetchone()
-                state["image"] = row[0] if row else ""
+                image_map = {row[0]: row[1] for row in cursor.fetchall()}
             except Exception as e:
-                print(f"[popular_states] image lookup failed for {state['name']}: {e}")
-                state["image"] = ""
+                print(f"[popular_states] batch image lookup failed: {e}")
+
+        for state in states:
+            state["image"] = image_map.get(state["id"], "")
             state.pop("id", None)
         return states
     finally:

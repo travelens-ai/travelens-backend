@@ -5,9 +5,17 @@ Drives onboarding pages, screen copy, and the bottom tab bar. The lookup lists
 can be changed without a deploy.
 """
 
+import threading
+import time
+
 from core.db import fetch_dicts
 from core.ads import get_ads_config, interleave_ads, get_inline_ads_config
 from core.images import with_image_urls
+
+_config_cache_lock = threading.Lock()
+_config_cache: dict | None = None
+_config_cache_ts: float = 0.0
+_CONFIG_TTL = 24 * 60 * 60  # seconds; data only changes on redeploy (process restart resets cache anyway)
 
 APP_CONFIG = {
     "pages": [
@@ -208,7 +216,7 @@ def _load_lookups():
     return group_types, food_preferences, activities, popular_states
 
 
-def get_config():
+def _build_config():
     group_types, food_preferences, activities, popular_states = _load_lookups()
     config = dict(APP_CONFIG)
     config["group_types"] = group_types
@@ -257,3 +265,22 @@ def get_config():
     config["popular_states_ads"] = get_inline_ads_config("popular_states")
     config["ads"] = get_ads_config()
     return config
+
+
+def get_config() -> dict:
+    global _config_cache, _config_cache_ts
+    if _config_cache is not None and time.monotonic() < _config_cache_ts:
+        return _config_cache  # fast path — no lock needed
+    with _config_cache_lock:
+        if _config_cache is not None and time.monotonic() < _config_cache_ts:
+            return _config_cache  # another thread built it while we waited
+        print("[config] cache miss — building")
+        result = _build_config()
+        _config_cache = result
+        _config_cache_ts = time.monotonic() + _CONFIG_TTL
+        return result
+
+
+def warm_config_cache():
+    """Pre-build the config cache in a daemon thread at startup."""
+    threading.Thread(target=get_config, daemon=True, name="warm-config").start()

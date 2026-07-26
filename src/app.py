@@ -24,6 +24,7 @@ from features.itinerary import itinerary_bp
 from features.itinerary.service import initialize_recommender, is_initialized
 from features.places import places_bp
 from features.places.service import load_city_coords, warm_enrich_cache
+from features.config.service import warm_config_cache
 from features.images import images_bp
 from features.user import user_bp
 from features.weather import weather_bp
@@ -80,6 +81,7 @@ init_db_async()
 initialize_recommender()
 load_city_coords()
 warm_enrich_cache()
+warm_config_cache()
 
 # ---------------------------------------------------------------------------
 # Background data-fill cron jobs (APScheduler)
