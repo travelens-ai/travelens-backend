@@ -138,6 +138,8 @@ elif _CRON_MODE == "test":
                        "interval", minutes=5, id="google_ratings")
     _scheduler.add_job(lambda: _run("fill_missing_images.py", ["--limit", "10"]),
                        "interval", minutes=5, id="image_fill")
+    _scheduler.add_job(lambda: _run("build_config_pkl.py"),
+                       "interval", minutes=5, id="config_pkl")
 else:
     # Production: google ratings at 3am (fills lat/lon too), images 4x daily
     _scheduler.add_job(lambda: _run("update_google_ratings.py", ["--batch", "200"]),
@@ -147,6 +149,10 @@ else:
     # Pre-warm Google Places SQLite cache for top-10 popular cities after a fresh deploy
     _scheduler.add_job(lambda: _run("warm_places_cache.py"),
                        "cron", hour=2, minute=30, id="warm_places_cache")
+    # Rebuild the /configs .pkl snapshots after the 3am ratings update (which
+    # feeds the popular_states ranking).
+    _scheduler.add_job(lambda: _run("build_config_pkl.py"),
+                       "cron", hour=3, minute=15, id="config_pkl")
 
 _scheduler.start()
 

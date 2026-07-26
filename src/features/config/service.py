@@ -5,12 +5,31 @@ Drives onboarding pages, screen copy, and the bottom tab bar. The lookup lists
 can be changed without a deploy.
 """
 
+import os
+import pickle
 import threading
 import time
 
 from core.db import fetch_dicts
 from core.ads import get_ads_config, interleave_ads, get_inline_ads_config
 from core.images import with_image_urls
+
+# Repo root — where the config snapshot .pkl files live (built by
+# scripts/build_config_pkl.py). Reading these avoids a DB round-trip on /configs.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+def _load_pkl(name):
+    """Load a config snapshot .pkl from repo root, or None if missing/unreadable."""
+    path = os.path.join(_PROJECT_ROOT, f"{name}.pkl")
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        print(f"[config] failed to read {name}.pkl: {e}")
+        return None
 
 _config_cache_lock = threading.Lock()
 _config_cache: dict | None = None
@@ -201,41 +220,42 @@ APP_CONFIG = {
 }
 
 
+def _lookup(name, db_loader):
+    """Return a config dataset, preferring the local .pkl snapshot and falling
+    back to a live DB query when the snapshot is missing. Returns [] if both the
+    pkl is absent and the DB query errors, so the rest of the config still serves.
+    Rebuild the snapshots with scripts/build_config_pkl.py."""
+    data = _load_pkl(name)
+    if data is not None:
+        return data
+    try:
+        return db_loader()
+    except Exception as e:
+        print(f"[config] failed to load {name} from DB: {e}")
+        return []
+
+
 def _load_lookups():
-    """Fetch the lookup lists from the database. Returns empty lists for any
-    table that errors so the rest of the config still serves."""
-    try:
-        group_types = [r["name"] for r in fetch_dicts(
-            "SELECT name FROM group_types ORDER BY id"
-        )]
-    except Exception as e:
-        print(f"[config] failed to load group_types: {e}")
-        group_types = []
-
-    try:
-        food_preferences = [r["name"] for r in fetch_dicts(
-            "SELECT name FROM food_preferences ORDER BY id"
-        )]
-    except Exception as e:
-        print(f"[config] failed to load food_preferences: {e}")
-        food_preferences = []
-
-    try:
-        activities = [
+    """Fetch the lookup lists, preferring the .pkl snapshots (see
+    scripts/build_config_pkl.py) with a per-dataset DB fallback."""
+    group_types = _lookup(
+        "group_types",
+        lambda: [r["name"] for r in fetch_dicts("SELECT name FROM group_types ORDER BY id")],
+    )
+    food_preferences = _lookup(
+        "food_preferences",
+        lambda: [r["name"] for r in fetch_dicts("SELECT name FROM food_preferences ORDER BY id")],
+    )
+    activities = _lookup(
+        "activities",
+        lambda: [
             {"id": r["ref_id"], "name": r["name"], "icon": r["icon"]}
             for r in fetch_dicts("SELECT ref_id, name, icon FROM activities ORDER BY id")
-        ]
-    except Exception as e:
-        print(f"[config] failed to load activities: {e}")
-        activities = []
-
-    try:
-        # Reuse the places service so the popularity ranking stays in one place.
-        from features.places.service import query_popular_states
-        popular_states = query_popular_states(10)
-    except Exception as e:
-        print(f"[config] failed to load popular_states: {e}")
-        popular_states = []
+        ],
+    )
+    # Reuse the places service so the popularity ranking stays in one place.
+    from features.places.service import query_popular_states
+    popular_states = _lookup("popular_states", lambda: query_popular_states(10))
 
     return group_types, food_preferences, activities, popular_states
 
@@ -307,6 +327,41 @@ def get_config() -> dict:
         return result
 
 
+# Datasets snapshotted to .pkl, mapped to the DB query that produces them.
+_SNAPSHOTS = {
+    "group_types": lambda: [r["name"] for r in fetch_dicts("SELECT name FROM group_types ORDER BY id")],
+    "food_preferences": lambda: [r["name"] for r in fetch_dicts("SELECT name FROM food_preferences ORDER BY id")],
+    "activities": lambda: [
+        {"id": r["ref_id"], "name": r["name"], "icon": r["icon"]}
+        for r in fetch_dicts("SELECT ref_id, name, icon FROM activities ORDER BY id")
+    ],
+    "popular_states": lambda: __import__(
+        "features.places.service", fromlist=["query_popular_states"]
+    ).query_popular_states(10),
+}
+
+
+def build_config_snapshots(only_missing=False):
+    """Query the DB and write each config dataset to `<name>.pkl` at repo root.
+    With only_missing=True, skips datasets whose pkl already exists (used at
+    startup to self-heal a fresh deploy without overwriting good snapshots)."""
+    for name, loader in _SNAPSHOTS.items():
+        if only_missing and _load_pkl(name) is not None:
+            continue
+        try:
+            data = loader()
+            path = os.path.join(_PROJECT_ROOT, f"{name}.pkl")
+            with open(path, "wb") as f:
+                pickle.dump(data, f)
+            print(f"[config] snapshot {name}.pkl ({len(data)} rows)")
+        except Exception as e:
+            print(f"[config] failed to snapshot {name}: {e}")
+
+
 def warm_config_cache():
-    """Pre-build the config cache in a daemon thread at startup."""
-    threading.Thread(target=get_config, daemon=True, name="warm-config").start()
+    """Build any missing snapshots, then pre-build the config cache — both in a
+    daemon thread at startup so a fresh deploy serves /configs from pkl."""
+    def _warm():
+        build_config_snapshots(only_missing=True)
+        get_config()
+    threading.Thread(target=_warm, daemon=True, name="warm-config").start()
