@@ -33,6 +33,7 @@ EXEMPT_PATHS = {
 # Path prefixes that never require auth (Swagger UI + spec, static, CORS
 # preflight lands here too via method check below).
 EXEMPT_PREFIXES = (
+    "/docs",
     "/apidocs",
     "/apispec",
     "/flasgger_static",
