@@ -169,12 +169,30 @@ def setup_models(system):
         raise
 
 
+def _load_state_names(system):
+    """Load all state names grouped by country_id into memory.
+    Returns dict[country_id -> frozenset of lowercase state names]."""
+    try:
+        rows = fetch_dicts("SELECT id, country_id, name FROM states", [])
+        result = {}
+        for row in rows:
+            cid = row['country_id']
+            if cid not in result:
+                result[cid] = set()
+            result[cid].add(str(row['name']).strip().lower())
+        return {k: frozenset(v) for k, v in result.items()}
+    except Exception as e:
+        print(f"Warning: could not load state names: {e}")
+        return {}
+
+
 def load_data(system):
     try:
         print("Loading data...")
         system.places_df = load_places_df(system)
         system.hotels_df = load_hotels_df(system)
         system.restaurants_df = load_restaurants_df(system)
+        system.state_names_by_country = _load_state_names(system)
 
         print("Data loaded successfully.")
         system.places_df = preprocess_places_data(system, system.places_df)

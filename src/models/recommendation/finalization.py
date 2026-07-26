@@ -508,21 +508,10 @@ def finalize_itinerary(system, itinerary, places, start_date=None, user_preferen
         token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
 
         if user_preferences:
-            with _TPE(max_workers=2) as ex:
-                fut_days = ex.submit(
-                    contextvars.copy_context().run, finalize_days, system, itinerary, days, places,
-                    start_date=start_date, start_day_index=0, user_preferences=user_preferences
-                )
-                fut_avail = ex.submit(
-                    contextvars.copy_context().run, _rec.get_available_places, system, itinerary,
-                    user_preferences, 30, scored_df=places
-                )
-            itinerary['itinerary'] = fut_days.result()
-            try:
-                itinerary['available_places'] = fut_avail.result()
-            except Exception as e:
-                print(f"Warning: _get_available_places failed: {e}")
-                itinerary['available_places'] = []
+            itinerary['itinerary'] = finalize_days(
+                system, itinerary, days, places,
+                start_date=start_date, start_day_index=0, user_preferences=user_preferences
+            )
         else:
             itinerary['itinerary'] = finalize_days(
                 system, itinerary, days, places, start_date=start_date, start_day_index=0
@@ -546,6 +535,6 @@ def finalize_itinerary(system, itinerary, places, start_date=None, user_preferen
         return {'status': 'error', 'message': str(e)}
 
 
-def get_available_places(system, itinerary, user_preferences, count, scored_df=None):
+def get_available_places(system, itinerary, user_preferences, count=None, scored_df=None):
     from models.recommendation.recommendations import get_available_places as _ap
     return _ap(system, itinerary, user_preferences, count, scored_df=scored_df)

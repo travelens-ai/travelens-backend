@@ -196,7 +196,7 @@ class ItenaryRecommendationSystem:
     def _trim_for_prompt(self, df, cols, n):
         return _rec.trim_for_prompt(self, df, cols, n)
 
-    def _get_available_places(self, itinerary, user_preferences, count, scored_df=None):
+    def _get_available_places(self, itinerary, user_preferences, count=None, scored_df=None):
         return _fin.get_available_places(self, itinerary, user_preferences, count, scored_df=scored_df)
 
     # ------------------------------------------------------------------
@@ -563,14 +563,6 @@ class ItenaryRecommendationSystem:
             itinerary['total_days'] = len(built_days)
 
             with lf_span("output_assembly"):
-                try:
-                    available = self._get_available_places(itinerary, user_preferences, 30, scored_df=places)
-                except Exception as e:
-                    print(f"Warning: _get_available_places failed: {e}")
-                    available = []
-                itinerary['available_places'] = available
-                yield {'event': 'available_places', 'available_places': available}
-
                 token_usage = itinerary.pop('_token_usage', None) if isinstance(itinerary, dict) else None
                 result = {
                     'status': 'success',

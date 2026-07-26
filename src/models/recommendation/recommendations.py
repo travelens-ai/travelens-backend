@@ -31,18 +31,27 @@ def get_place_recommendations(system, user_preferences):
         preferred_location = destination.lower()
         location_parts = [part.strip() for part in preferred_location.split(",")]
 
-        city_matches = top_places[
-            top_places['city'].fillna('').astype(str).str.lower().apply(
-                lambda city: any(part == city for part in location_parts)
-            )
-        ]
-        if not city_matches.empty:
-            top_places = city_matches.copy()
-        else:
+        first_part = location_parts[0] if location_parts else ''
+        india_states = getattr(system, 'state_names_by_country', {}).get(1, frozenset())
+        is_indian_state = first_part in india_states
+
+        if is_indian_state:
             top_places = top_places[
-                top_places['state'].fillna('').astype(str).str.lower().apply(
-                    lambda state: any(part == state for part in location_parts))
+                top_places['state'].fillna('').astype(str).str.lower().isin(location_parts)
             ].copy()
+        else:
+            city_matches = top_places[
+                top_places['city'].fillna('').astype(str).str.lower().apply(
+                    lambda city: any(part == city for part in location_parts)
+                )
+            ]
+            if not city_matches.empty:
+                top_places = city_matches.copy()
+            else:
+                top_places = top_places[
+                    top_places['state'].fillna('').astype(str).str.lower().apply(
+                        lambda state: any(part == state for part in location_parts))
+                ].copy()
 
         C = top_places['rating'].mean()
         top_places['rating_score'] = top_places.apply(
@@ -180,7 +189,7 @@ def get_restaurant_recommendations(system, user_preferences):
         return _return(_annotate_and_count(top_restaurants.head(100)), "empty/llm")
 
 
-def get_available_places(system, itinerary, user_preferences, count, scored_df=None):
+def get_available_places(system, itinerary, user_preferences, count=None, scored_df=None):
     used_names = set()
     for day in itinerary.get('itinerary', []):
         for item in day.get('timeline', []):
@@ -191,9 +200,9 @@ def get_available_places(system, itinerary, user_preferences, count, scored_df=N
 
     if scored_df is None:
         scored_df = get_place_recommendations(system, user_preferences)
-    remaining_df = scored_df[
-        ~scored_df['effective_name'].str.strip().str.lower().isin(used_names)
-    ].head(count)
+    eff_used = scored_df['effective_name'].str.strip().str.lower().isin(used_names)
+    raw_used = scored_df['placename'].str.strip().str.lower().isin(used_names)
+    remaining_df = scored_df[~(eff_used | raw_used)]
 
     if remaining_df.empty:
         return []

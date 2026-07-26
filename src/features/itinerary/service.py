@@ -169,6 +169,29 @@ def get_session_id(itinerary_id):
     return None
 
 
+def get_itinerary_by_id(itinerary_id):
+    """Return (request_json_dict, response_json_dict) for a stored itinerary, or (None, None)."""
+    if not itinerary_id or not is_db_ready():
+        return None, None
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT request_json, response_json FROM itineraries WHERE id = ?",
+            (itinerary_id,),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if not row:
+            return None, None
+        return json.loads(row[0] or '{}'), json.loads(row[1] or '{}')
+    except Exception as e:
+        print(f"Failed to fetch itinerary {itinerary_id}: {e}")
+        return None, None
+    finally:
+        conn.close()
+
+
 def update_itinerary(cache_key, itinerary_id, user_preferences, result):
     """Overwrite an existing itinerary row's request/response JSON after a
     successful edit. Returns the itinerary_id if the row was updated, else None

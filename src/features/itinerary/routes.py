@@ -449,6 +449,44 @@ def edit_itinerary():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@itinerary_bp.route("/available-places/<int:itinerary_id>", methods=["GET"])
+def get_available_places_for_itinerary(itinerary_id):
+    """Return all available (non-itinerary) places for a saved itinerary.
+    ---
+    tags:
+      - Travel
+    parameters:
+      - in: path
+        name: itinerary_id
+        type: integer
+        required: true
+        description: ID returned from generate-itinerary or the SSE done event
+    responses:
+      200:
+        description: List of available places with images and place details
+      404:
+        description: Itinerary not found
+      503:
+        description: Service still loading
+    """
+    if not itinerary_service.is_initialized():
+        return itinerary_service.loading_response()
+    try:
+        user_prefs, stored_result = itinerary_service.get_itinerary_by_id(itinerary_id)
+        if user_prefs is None:
+            return jsonify({"status": "error", "message": "Itinerary not found"}), 404
+
+        itinerary = (
+            stored_result.get("data", {}).get("detailed_itinerary", {})
+            if isinstance(stored_result, dict) else {}
+        )
+        places = itinerary_service.recommender._get_available_places(itinerary, user_prefs, None)
+        return jsonify(_sanitize_nan(with_image_urls({"available_places": places}))), 200
+    except Exception as e:
+        print(f"Error fetching available places for itinerary {itinerary_id}: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @itinerary_bp.route("/popular-destination", methods=["GET"])
 def get_popular_destination():
     """Get popular destinations
