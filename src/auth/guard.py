@@ -28,6 +28,7 @@ EXEMPT_PATHS = {
     "/health",
     "/",
     "/configs",
+    "/get-messaging"
 }
 
 # Path prefixes that never require auth (Swagger UI + spec, static, CORS
@@ -39,6 +40,7 @@ EXEMPT_PREFIXES = (
     "/flasgger_static",
     "/swagger",
     "/static",
+    "/get-messaging"
 )
 
 

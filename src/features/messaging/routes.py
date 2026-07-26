@@ -69,7 +69,7 @@ def register_token():
     return jsonify({"status": status, "message": msg}), code
 
 
-@messaging_bp.route("/messaging", methods=["GET"])
+@messaging_bp.route("/get-messaging", methods=["GET"])
 def list_tokens():
     """Fetch all device-token registrations (device_id + user_id, no token value)
     ---
