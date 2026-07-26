@@ -50,26 +50,18 @@ def save_token(*, device_id, fcm_token, user_id=None):
 
 
 def list_tokens():
-    """Return all device-token registrations as a list of dicts with device_id
-    and user_id (and timestamps) — the fcm_token value itself is deliberately
-    omitted. Returns (rows, (status, message, code))."""
+    """Return all device-token registrations as a list of dicts. Uses SELECT *,
+    so every column (including fcm_token) is returned, keyed by column name.
+    Returns (rows, (status, message, code))."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(
-            """
-            SELECT id, device_id, user_id, created_at, updated_at
-            FROM device_tokens
-            ORDER BY updated_at DESC
-            """
-        )
+        cursor.execute("SELECT * FROM device_tokens ORDER BY updated_at DESC")
+        columns = [col[0] for col in cursor.description]
         rows = [
             {
-                "id": int(r[0]),
-                "device_id": r[1],
-                "user_id": r[2],
-                "created_at": r[3].isoformat() if r[3] is not None else None,
-                "updated_at": r[4].isoformat() if r[4] is not None else None,
+                col: (val.isoformat() if hasattr(val, "isoformat") else val)
+                for col, val in zip(columns, r)
             }
             for r in cursor.fetchall()
         ]
