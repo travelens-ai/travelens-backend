@@ -29,21 +29,21 @@ GOOGLE_ADTYPES = {"banner", "native", "sticky_banner", "interstitial"}
 # real items).
 INLINE_ADS = {
     "popular_states": {
-        "adunit": "ca-app-pub-3940256099942544/6300978111",
+        "adunit": "ca-app-pub-1212463394821755/6154853533",
         "adtype": "banner",
         "width": 320,
         "height": 100,
         "every": 6,
     },
     "favorites": {
-        "adunit": "ca-app-pub-3940256099942544/6300978111",
+        "adunit": "ca-app-pub-1212463394821755/6565917075",
         "adtype": "native",
         "width": 320,
         "height": 250,
         "every": 2,
     },
     "history": {
-        "adunit": "ca-app-pub-3940256099942544/6300978111",
+        "adunit": "ca-app-pub-1212463394821755/6565917075",
         "adtype": "native",
         "width": 320,
         "height": 250,
@@ -52,7 +52,7 @@ INLINE_ADS = {
     # Itinerary detail page — between the places / accommodations / restaurants
     # sections within each day.
     "itinerary_section": {
-        "adunit": "ca-app-pub-3940256099942544/6300978111",
+        "adunit": "ca-app-pub-1212463394821755/6154853533",
         "adtype": "banner",
         "width": 320,
         "height": 100,
@@ -61,7 +61,7 @@ INLINE_ADS = {
     # Loader screen — a single ad shown while content (e.g. an itinerary) is
     # being generated. Not a list, so `every` is unused; served as one slot.
     "loader": {
-        "adunit": "ca-app-pub-3940256099942544/6300978111",
+        "adunit": "ca-app-pub-1212463394821755/6565917075",
         "adtype": "native",
         "width": 320,
         "height": 250,
@@ -84,7 +84,7 @@ INLINE_ADS = {
 #   interstitial  — pages that show a full-screen interstitial on entry/exit
 STICKY_ADS = {
     "ITINERARY": {
-        "adunit": "ca-app-pub-3940256099942544/2934735716",
+        "adunit": "ca-app-pub-1212463394821755/6154853533",
         "adtype": "sticky_banner",
         "width": 320,
         "height": 50,
@@ -93,7 +93,7 @@ STICKY_ADS = {
 
 INTERSTITIAL_ADS = {
     "ITINERARY": {
-        "adunit": "ca-app-pub-3940256099942544/1033173712",
+        "adunit": "ca-app-pub-1212463394821755/9789746139",
         "adtype": "interstitial",
         "width": 0,
         "height": 0,
