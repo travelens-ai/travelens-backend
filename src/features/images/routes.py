@@ -1,7 +1,11 @@
+from urllib.parse import quote
+
 from flask import Blueprint, request, jsonify
 
 from features.itinerary.service import imageGenerator, is_initialized, loading_response
 from models.recommendation.db_persistence import _fetch_image_urls
+
+_WESERV = "https://images.weserv.nl/?url="
 
 images_bp = Blueprint("images", __name__)
 
@@ -41,7 +45,8 @@ def place_image_urls():
         if not name:
             continue
         urls = _fetch_image_urls(name, count=1)
-        results[name] = urls[0][0] if urls else ""
+        raw = urls[0][0] if urls else ""
+        results[name] = (_WESERV + quote(raw, safe="")) if raw else ""
 
     return jsonify({"status": "success", "results": results}), 200
 
