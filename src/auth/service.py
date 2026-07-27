@@ -117,7 +117,7 @@ def verify_otp_record(email, otp, purpose):
         conn.close()
 
 
-def create_user(name, email, password, phone=None, age=None, gender=None, trip_type=None, trip_companion=None, device_id=None):
+def create_user(name, email, password, phone=None, age=None, gender=None, group_type=None, food_preference=None, activities=None, device_id=None):
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -134,10 +134,10 @@ def create_user(name, email, password, phone=None, age=None, gender=None, trip_t
 
         password_hash = hash_password(password)
         cursor.execute(
-            """INSERT INTO users (name, email, phone, password_hash, age, gender, trip_type, trip_companion, is_verified)
+            """INSERT INTO users (name, email, phone, password_hash, age, gender, group_type, food_preference, activities, is_verified)
                OUTPUT INSERTED.id
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-            (name, email, phone, password_hash, age, gender, trip_type, trip_companion),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (name, email, phone, password_hash, age, gender, group_type, food_preference, activities),
         )
         user_id = int(cursor.fetchone()[0])
         conn.commit()
@@ -151,7 +151,7 @@ def create_user(name, email, password, phone=None, age=None, gender=None, trip_t
         conn.commit()
 
         token = create_token(user_id, email)
-        user = {"id": user_id, "name": name, "email": email, "phone": phone, "age": age, "gender": gender, "trip_type": trip_type, "trip_companion": trip_companion}
+        user = {"id": user_id, "name": name, "email": email, "phone": phone, "age": age, "gender": gender, "group_type": group_type, "food_preference": food_preference, "activities": activities}
         return {"token": token, "user": user}, ("success", "User registered successfully", 201)
     except Exception as e:
         conn.rollback()
@@ -179,8 +179,8 @@ def authenticate_user(email, password):
         return {"token": token, "user": {
             "id": user["id"], "name": user["name"], "email": user["email"],
             "phone": user["phone"], "age": user["age"], "gender": user["gender"],
-            "trip_type": user["trip_type"], "trip_companion": user["trip_companion"],
-            "profile_picture": user["profile_picture"],
+            "group_type": user["group_type"], "food_preference": user["food_preference"],
+            "activities": user["activities"], "profile_picture": user["profile_picture"],
         }}, ("success", "Login successful", 200)
     except Exception as e:
         return None, ("error", str(e), 500)
@@ -227,7 +227,7 @@ def update_user_profile(user_id, data):
             conn.commit()
             return {}, ("success", "Password updated successfully", 200)
 
-        updatable_fields = ["name", "phone", "age", "gender", "trip_type", "trip_companion", "profile_picture"]
+        updatable_fields = ["name", "phone", "age", "gender", "group_type", "food_preference", "activities", "profile_picture"]
         updates = []
         values = []
         for field in updatable_fields:
@@ -243,7 +243,7 @@ def update_user_profile(user_id, data):
         conn.commit()
 
         cursor.execute(
-            "SELECT id, name, email, phone, age, gender, trip_type, trip_companion, profile_picture FROM users WHERE id = ?",
+            "SELECT id, name, email, phone, age, gender, group_type, food_preference, activities, profile_picture FROM users WHERE id = ?",
             (user_id,),
         )
         updated_user = _fetchone_dict(cursor)
@@ -274,8 +274,8 @@ def google_upsert_user(google_id, email, name, picture, device_id=None):
             return {"token": token, "user": {
                 "id": user["id"], "name": user["name"], "email": user["email"],
                 "phone": user["phone"], "age": user["age"], "gender": user["gender"],
-                "trip_type": user["trip_type"], "trip_companion": user["trip_companion"],
-                "profile_picture": user.get("profile_picture") or picture,
+                "group_type": user["group_type"], "food_preference": user["food_preference"],
+                "activities": user["activities"], "profile_picture": user.get("profile_picture") or picture,
             }, "is_new": False}, ("success", "Login successful", 200)
         else:
             cursor.execute(

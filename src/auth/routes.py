@@ -147,14 +147,18 @@ def signup():
               type: string
               enum: [male, female, other]
               example: male
-            trip_type:
+            group_type:
               type: string
               description: "solo, friends, family"
               example: solo
-            trip_companion:
+            food_preference:
               type: string
-              description: "male, female, mix, with_children, without_children"
-              example: male
+              description: "vegetarian, non_vegetarian, vegan"
+              example: vegetarian
+            activities:
+              type: string
+              description: "comma-separated activities"
+              example: "Beach, Sightseeing"
     responses:
       201:
         description: User registered successfully
@@ -181,8 +185,9 @@ def signup():
         phone=data.get("phone"),
         age=data.get("age"),
         gender=data.get("gender"),
-        trip_type=data.get("trip_type"),
-        trip_companion=data.get("trip_companion"),
+        group_type=data.get("group_type"),
+        food_preference=data.get("food_preference"),
+        activities=data.get("activities"),
         device_id=data.get("device_id"),
     )
     if result:
@@ -345,12 +350,15 @@ def update_profile():
             gender:
               type: string
               enum: [male, female, other]
-            trip_type:
+            group_type:
               type: string
               example: family
-            trip_companion:
+            food_preference:
               type: string
-              example: with_children
+              example: vegetarian
+            activities:
+              type: string
+              example: "Beach, Sightseeing"
             profile_picture:
               type: string
               example: https://example.com/pic.jpg
