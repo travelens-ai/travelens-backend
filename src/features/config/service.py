@@ -150,7 +150,7 @@ APP_CONFIG = {
                 "popularDestinations": "Popular Destinations",
                 # Planner step 2
                 "step2Of3": "Step 2 of 3",
-                "whenAndWho": "When & Who?",
+                "whenAndWho": "Details?",
                 "skip": "Skip",
                 "selectDateRange": "Select date range",
                 "numberOfPeople": "Number of people",
@@ -443,7 +443,7 @@ APP_CONFIG = {
             "bg": "",
             "texts": {
                 "modalTitle": "Edit Itinerary",
-                "tabWhenAndWho": "When & Who",
+                "tabWhenAndWho": "Details",
                 "tabPreferences": "Preferences",
                 "tabPlaces": "Places",
                 "selectDateRangeLabel": "Select date range",
