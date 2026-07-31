@@ -14,6 +14,19 @@ from flasgger import Swagger
 # load_dotenv is called inside core/config.py — must be imported before anything else
 from core import config as _config_init  # noqa: F401 (triggers load_dotenv)
 from core.config import PORT
+
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+
+_sentry_dsn = os.getenv("SENTRY_DSN")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[FlaskIntegration()],
+        traces_sample_rate=0.1,  # 10% of requests for performance tracing
+        send_default_pii=False,
+    )
+    print("[sentry] initialized")
 from core.langfuse_client import get_langfuse as _get_langfuse
 
 from core.swagger_config import swagger_template, swagger_config
@@ -160,8 +173,26 @@ def health_check():
     responses:
       200:
         description: Service is healthy
+      503:
+        description: Service unhealthy (DB unreachable)
     """
-    return jsonify({"status": "healthy", "initialized": is_initialized()}), 200
+    db_ok = False
+    try:
+        from core.db import get_connection
+        conn = get_connection()
+        conn.cursor().execute("SELECT 1")
+        conn.close()
+        db_ok = True
+    except Exception:
+        pass
+
+    status = "healthy" if db_ok else "degraded"
+    http_code = 200 if db_ok else 503
+    return jsonify({
+        "status": status,
+        "initialized": is_initialized(),
+        "db": "ok" if db_ok else "unreachable",
+    }), http_code
 
 
 def _flush_langfuse():

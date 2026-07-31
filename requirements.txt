@@ -36,3 +36,4 @@ SQLAlchemy>=2.0
 flasgger
 APScheduler==3.10.4
 langfuse>=2.0.0
+sentry-sdk[flask]>=2.0.0
