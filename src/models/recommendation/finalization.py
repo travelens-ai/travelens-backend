@@ -288,55 +288,70 @@ def attach_weather(system, itinerary, start_date_str):
 
 
 def finalize_trip_level(system, itinerary, places):
-    if places.empty:
-        places = system.getEditPlaces(itinerary['city'], itinerary['state'])
-
-    merged_places = list(places.to_dict(orient='records'))
-    popular_destinations = system.get_popular_destination()
-    if popular_destinations:
-        merged_places.extend(popular_destinations)
-
-    place_image_map = {}
-    for place in merged_places:
-        image = place.get('image')
-        if image and pd.notna(image):
-            pname = place.get('placename') or place.get('city') or place.get('name', '')
-            if pname:
-                place_image_map[pname] = image
-
-    placename = itinerary['name']
-
-    if placename not in place_image_map:
-        place_image_map[placename] = None
-
-    main_single_image = None
-    if placename in place_image_map and pd.notna(place_image_map[placename]):
-        main_single_image = place_image_map[placename]
-
-    with lf_span("trip_images", input={"placename": placename, "city": itinerary.get('city')}):
-        main_images = _img.get_images_for_places(system, [placename]).get(
-            str(placename).strip().lower(), []
-        )
-        if not main_images:
-            main_images = _img.search_images_by_keywords(
-                system, [placename, itinerary.get('city'), itinerary.get('state')], limit=5
-            )
-        if not main_images and main_single_image:
-            main_images = [main_single_image]
-        lf_update_span(output={"images_count": len(main_images)})
-    itinerary['images'] = main_images
-
+    city = itinerary.get('city', '')
     similar = itinerary.get('similar_places') or []
-    threading.Thread(target=system.save_similar_places, args=(similar,), daemon=True).start()
-    for place in similar:
-        sp_name = place.get('placename')
-        db_img = _img.get_city_image(system, sp_name or '', place.get('state', '')) if sp_name else ''
-        place['image'] = db_img if db_img else None
+    with lf_span("finalize_trip_level", input={
+        'city': city,
+        'trip_name': itinerary.get('name', ''),
+        'similar_places_count': len(similar),
+    }):
+        if places.empty:
+            places = system.getEditPlaces(itinerary['city'], itinerary['state'])
 
-    system._place_image_fallback = {
-        str(name).strip().lower(): img for name, img in place_image_map.items()
-    }
-    return places
+        merged_places = list(places.to_dict(orient='records'))
+        popular_destinations = system.get_popular_destination()
+        if popular_destinations:
+            merged_places.extend(popular_destinations)
+
+        place_image_map = {}
+        for place in merged_places:
+            image = place.get('image')
+            if image and pd.notna(image):
+                pname = place.get('placename') or place.get('city') or place.get('name', '')
+                if pname:
+                    place_image_map[pname] = image
+
+        placename = itinerary['name']
+
+        if placename not in place_image_map:
+            place_image_map[placename] = None
+
+        main_single_image = None
+        if placename in place_image_map and pd.notna(place_image_map[placename]):
+            main_single_image = place_image_map[placename]
+
+        with lf_span("trip_images", input={"placename": placename, "city": city}):
+            main_images = _img.get_images_for_places(system, [placename]).get(
+                str(placename).strip().lower(), []
+            )
+            if not main_images:
+                main_images = _img.search_images_by_keywords(
+                    system, [placename, city, itinerary.get('state')], limit=5
+                )
+            if not main_images and main_single_image:
+                main_images = [main_single_image]
+            lf_update_span(output={"images_count": len(main_images)})
+        itinerary['images'] = main_images
+
+        threading.Thread(target=system.save_similar_places, args=(similar,), daemon=True).start()
+        with lf_span("similar_place_images", input={"count": len(similar)}):
+            _sim_resolved = 0
+            for place in similar:
+                sp_name = place.get('placename')
+                db_img = _img.get_city_image(system, sp_name or '', place.get('state', '')) if sp_name else ''
+                place['image'] = db_img if db_img else None
+                if db_img:
+                    _sim_resolved += 1
+            lf_update_span(output={"resolved_count": _sim_resolved})
+
+        system._place_image_fallback = {
+            str(name).strip().lower(): img for name, img in place_image_map.items()
+        }
+        lf_update_span(output={
+            'trip_images_count': len(itinerary.get('images', [])),
+            'similar_resolved': _sim_resolved,
+        })
+        return places
 
 
 def _parse_time_key(item):
@@ -414,7 +429,9 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
     ]
     with lf_span("image_resolution", input={"place_count": len(all_place_names)}):
         place_images_db = _img.get_images_for_places(system, all_place_names) if all_place_names else {}
+        db_hits = len(place_images_db)
         resolved_count = 0
+        fallback_fetches = 0
         for day in days:
             for item in day.get('timeline', []):
                 if item.get('type') != 'place':
@@ -423,6 +440,7 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
                 key = place_name.lower()
                 images = place_images_db.get(key, [])[:5]
                 if not images:
+                    fallback_fetches += 1
                     images = _img.search_images_by_keywords(system, [place_name], limit=5)
                 if not images:
                     single = fallback_map.get(key)
@@ -433,7 +451,12 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
                 item['images'] = images
                 if images:
                     resolved_count += 1
-        lf_update_span(output={"resolved_count": resolved_count})
+        lf_update_span(output={
+            "resolved_count": resolved_count,
+            "db_hits": db_hits,
+            "fallback_fetches": fallback_fetches,
+            "unresolved": len(all_place_names) - resolved_count,
+        })
 
     _sort_timeline_by_time(days)
     _trim_last_day_after_checkout(days, user_preferences)
@@ -446,6 +469,11 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
         'hotels': itinerary.get('hotels', []),
     }
     with lf_span("lat_lon_travel_times", input={"city": city, "day_count": len(days)}):
+        _total_places = sum(
+            1 for day in days
+            for item in day.get('timeline', [])
+            if item.get('type') == 'place'
+        )
         attach_lat_long(system, ctx)
         attach_db_fields(system, ctx)
         resolved_ll = sum(
@@ -453,21 +481,37 @@ def finalize_days(system, itinerary, days, places, start_date=None, start_day_in
             for item in day.get('timeline', [])
             if item.get('lat') is not None
         )
-        lf_update_span(output={"resolved_lat_lon_count": resolved_ll})
+        lf_update_span(output={
+            "resolved_lat_lon_count": resolved_ll,
+            "total_places": _total_places,
+            "unresolved": max(0, _total_places - resolved_ll),
+        })
 
     if start_date:
         from datetime import datetime, timedelta
         try:
             base = datetime.strptime(start_date, "%Y-%m-%d").date()
             subset_start = (base + timedelta(days=start_day_index)).strftime("%Y-%m-%d")
-            with lf_span("weather_attachment", input={"start_date": subset_start, "city": city}):
+            _weather_tasks = sum(
+                1 for day in days
+                for item in day.get('timeline', [])
+                if item.get('type') == 'place' and item.get('lat') is not None
+            )
+            with lf_span("weather_attachment", input={
+                "start_date": subset_start,
+                "city": city,
+                "tasks_dispatched": _weather_tasks,
+            }):
                 attach_weather(system, ctx, subset_start)
                 weather_count = sum(
                     1 for day in days
                     for item in day.get('timeline', [])
                     if item.get('weather')
                 )
-                lf_update_span(output={"weather_entries_count": weather_count})
+                lf_update_span(output={
+                    "weather_entries_count": weather_count,
+                    "coverage_pct": round(weather_count / _weather_tasks * 100) if _weather_tasks else 0,
+                })
             for idx, day in enumerate(days):
                 day_date = base + timedelta(days=start_day_index + idx)
                 day['date'] = day_date.strftime("%Y-%m-%d")

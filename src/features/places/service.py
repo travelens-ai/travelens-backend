@@ -9,6 +9,7 @@ from core.db import new_connection
 
 _city_coords_cache = {}
 _city_coords_loaded = False
+_city_coords_lock = threading.Lock()
 
 # --- result caches ---
 _QUERY_TTL   = 7 * 24 * 60 * 60   # 7 days — effectively "until restart" at low traffic
@@ -114,25 +115,37 @@ def is_coords_loaded():
     return _city_coords_loaded
 
 
-def load_city_coords():
-    def _do_load():
-        global _city_coords_cache, _city_coords_loaded
-        try:
-            conn = new_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT name, lat, lon FROM cities")
-            rows = _cursor_to_dicts(cursor)
-            cursor.close()
-            conn.close()
-            for row in rows:
-                if row["name"] and row["lat"] is not None:
-                    _city_coords_cache[row["name"].strip().lower()] = (float(row["lat"]), float(row["lon"]))
-            _city_coords_loaded = True
-            print(f"Loaded {len(_city_coords_cache)} city coordinates from DB.")
-        except Exception as e:
-            print(f"[places] Failed to load city coords from DB: {e}")
+def _load_city_coords_sync():
+    global _city_coords_cache, _city_coords_loaded
+    try:
+        conn = new_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name, lat, lon FROM cities")
+        rows = _cursor_to_dicts(cursor)
+        cursor.close()
+        conn.close()
+        for row in rows:
+            if row["name"] and row["lat"] is not None:
+                _city_coords_cache[row["name"].strip().lower()] = (float(row["lat"]), float(row["lon"]))
+        _city_coords_loaded = True
+        print(f"Loaded {len(_city_coords_cache)} city coordinates from DB.")
+    except Exception as e:
+        print(f"[places] Failed to load city coords from DB: {e}")
 
-    threading.Thread(target=_do_load, daemon=True).start()
+
+def _ensure_city_coords():
+    """Lazily load city coords if the background thread missed them at startup."""
+    if _city_coords_cache:
+        return
+    with _city_coords_lock:
+        if _city_coords_cache:
+            return
+        print("[places] city coords cache empty — loading synchronously on first request")
+        _load_city_coords_sync()
+
+
+def load_city_coords():
+    threading.Thread(target=_load_city_coords_sync, daemon=True).start()
 
 
 def _city_aggregate_query(city_filter=None, limit=50):
@@ -583,6 +596,7 @@ def query_trending(lat=None, lon=None):
 
 
 def query_nearby(lat, lon):
+    _ensure_city_coords()
     lat, lon = round(lat, 1), round(lon, 1)   # bucket to ~11km grid for cache sharing
     # Start at 150 km; expand to 250 km if fewer than 5 results (sparse regions).
     # Lower bound 1 km excludes the user's own city (exact match is 0 km).
@@ -614,6 +628,7 @@ def query_nearby(lat, lon):
 
 
 def query_weekend(lat, lon):
+    _ensure_city_coords()
     lat, lon = round(lat, 1), round(lon, 1)   # bucket to ~11km grid for cache sharing
     # 150–350 km: far enough to feel like a trip, close enough for a weekend.
     # Name-based exclusion guards against the home city appearing via spelling variants.

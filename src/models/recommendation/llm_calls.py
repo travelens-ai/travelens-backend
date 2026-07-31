@@ -239,7 +239,14 @@ def collect_used_place_names(days):
 
 
 def generate_trip_skeleton(system, user_preferences, top_places, top_restaurants, top_hotels):
-    with lf_span("trip_skeleton", as_type="generation"):
+    with lf_span("trip_skeleton", as_type="generation", input={
+        'destination': user_preferences.get('places_of_interest', ''),
+        'trip_type': user_preferences.get('trip_type', ''),
+        'trip_duration': user_preferences.get('trip_duration', ''),
+        'places_count': len(top_places),
+        'hotels_count': len(top_hotels),
+        'restaurants_count': len(top_restaurants),
+    }):
         from prompts import generate_trip_skeleton_prompt
         messages = generate_trip_skeleton_prompt(
             user_preferences, top_places, top_restaurants, top_hotels
@@ -283,17 +290,25 @@ def generate_trip_skeleton(system, user_preferences, top_places, top_restaurants
 
 
 def generate_detailed_itinerary(system, user_preferences, top_places, top_hotels, top_restaurants, rest_slot_counts=None):
-    with lf_span("detailed_itinerary", as_type="generation"):
-        from prompts import generate_travel_itinerary_prompt
-        n_places = places_count_for_trip(user_preferences.get('trip_duration', 3))
-        places_trimmed = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, n_places), max_chars=50)
-        hotels_trimmed = trim_for_prompt(system, top_hotels, HOTEL_COLS_PROMPT, 10)
-        rests_trimmed  = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, 15), max_chars=50)
-        messages = generate_travel_itinerary_prompt(
-            user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
-            rest_slot_counts=rest_slot_counts,
-        )
-        print(f"Prompt length: {sum(len(m['content']) for m in messages)} chars")
+    from prompts import generate_travel_itinerary_prompt
+    n_places = places_count_for_trip(user_preferences.get('trip_duration', 3))
+    places_trimmed = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, n_places), max_chars=50)
+    hotels_trimmed = trim_for_prompt(system, top_hotels, HOTEL_COLS_PROMPT, 10)
+    rests_trimmed  = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, 15), max_chars=50)
+    messages = generate_travel_itinerary_prompt(
+        user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
+        rest_slot_counts=rest_slot_counts,
+    )
+    print(f"Prompt length: {sum(len(m['content']) for m in messages)} chars")
+    with lf_span("detailed_itinerary", as_type="generation", input={
+        'destination': user_preferences.get('places_of_interest', ''),
+        'trip_type': user_preferences.get('trip_type', ''),
+        'trip_duration': user_preferences.get('trip_duration', ''),
+        'places_count': len(places_trimmed),
+        'hotels_count': len(hotels_trimmed),
+        'restaurants_count': len(rests_trimmed),
+        'prompt_chars': sum(len(m['content']) for m in messages),
+    }):
 
         response = system.client.responses.create(
             model=system.chat_deployment,
@@ -364,7 +379,12 @@ def ensure_full_days(system, itinerary, user_preferences, places_trimmed, rests_
 
 def generate_extra_days(system, user_preferences, top_places, top_restaurants, top_hotels,
                         start_day, num_days, used_places, itinerary=None, rest_slot_counts=None):
-    with lf_span("extra_days", as_type="generation"):
+    with lf_span("extra_days", as_type="generation", input={
+        'destination': user_preferences.get('places_of_interest', ''),
+        'start_day': start_day,
+        'num_days': num_days,
+        'used_places_count': len(used_places),
+    }):
         from prompts import generate_extra_days_prompt
         top_places = truncate_text_cols(trim_for_prompt(system, top_places, PLACE_COLS_PROMPT, len(top_places)), max_chars=80)
         top_restaurants = truncate_text_cols(trim_for_prompt(system, top_restaurants, REST_COLS_PROMPT, len(top_restaurants)), max_chars=60)
@@ -374,10 +394,6 @@ def generate_extra_days(system, user_preferences, top_places, top_restaurants, t
             rest_slot_counts=rest_slot_counts,
         )
         print(f"[days] requesting {num_days} extra day(s) starting at day {start_day}")
-        if _LF_AVAILABLE:
-            _lf_get_client().update_current_span(
-                metadata={"start_day": start_day, "num_days": num_days},
-            )
         max_tok = getattr(system, 'max_tokens_day', system.max_tokens) * max(1, num_days)
         response = system.client.responses.create(
             model=system.chat_deployment,
@@ -408,7 +424,7 @@ def generate_destination_description(system, destination):
         return ""
     _SYSTEM_DESC = "You are a travel copywriter. Output only the description text — no titles, quotes, markdown, labels, or commentary."
 
-    with lf_span("destination_description", as_type="generation"):
+    with lf_span("destination_description", as_type="generation", input={"destination": destination}):
         try:
             user_prompt = f"Write a short, engaging 1-2 sentence travel description for {destination}."
             response = system.client.responses.create(

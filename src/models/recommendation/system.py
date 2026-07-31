@@ -18,7 +18,7 @@ from models.recommendation import recommendations as _rec
 from models.recommendation import finalization as _fin
 from models.recommendation import llm_calls as _llm
 from models.recommendation import db_persistence as _dbp
-from models.recommendation.langfuse_helpers import lf_span, lf_update_span
+from models.recommendation.langfuse_helpers import lf_span, lf_update_span, safe_prefs
 
 try:
     from langfuse import observe as _lf_observe, get_client as _lf_get_client, propagate_attributes as _lf_propagate
@@ -365,7 +365,7 @@ class ItenaryRecommendationSystem:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
 
-            with lf_span("generate_itinerary"):
+            with lf_span("generate_itinerary", input=safe_prefs(user_preferences)):
                 with _lf_propagate(
                     user_id=str(user_preferences.get('_user_id') or ''),
                     session_id=str(user_preferences.get('_session_id') or ''),
@@ -401,13 +401,26 @@ class ItenaryRecommendationSystem:
                             user_preferences, places, hotels, restaurants,
                             rest_slot_counts=rest_slots,
                         )
+                        _token_usage = itinerary.get('_token_usage') or {} if isinstance(itinerary, dict) else {}
+                        lf_update_span(output={
+                            'input_tokens': _token_usage.get('input_token', 0),
+                            'output_tokens': _token_usage.get('output_token', 0),
+                        })
 
-                    with lf_span("finalization"):
-                        return self._finalize_itinerary(
+                    with lf_span("finalization", input={
+                        'city': itinerary.get('city', '') if isinstance(itinerary, dict) else '',
+                        'days': len(itinerary.get('itinerary', [])) if isinstance(itinerary, dict) else 0,
+                    }):
+                        result = self._finalize_itinerary(
                             itinerary, places,
                             start_date=user_preferences.get('start_date'),
                             user_preferences=user_preferences,
                         )
+                        _out_days = len(
+                            (result.get('data') or {}).get('detailed_itinerary', {}).get('itinerary', [])
+                        ) if isinstance(result, dict) else 0
+                        lf_update_span(output={'status': 'success', 'days': _out_days})
+                        return result
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing:", e)
@@ -425,6 +438,20 @@ class ItenaryRecommendationSystem:
         try:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
+
+            if _LF_AVAILABLE:
+                _lf_get_client().update_current_span(input=safe_prefs(user_preferences))
+
+            _propagate_ctx = _lf_propagate(
+                user_id=str(user_preferences.get('_user_id') or ''),
+                session_id=str(user_preferences.get('_session_id') or ''),
+                metadata={
+                    'destination': user_preferences.get('places_of_interest', ''),
+                    'trip_type': user_preferences.get('trip_type', ''),
+                    'trip_duration': user_preferences.get('trip_duration', ''),
+                },
+            )
+            _propagate_ctx.__enter__()
 
             yield {'event': 'progress', 'step': 'started', 'message': 'Starting your itinerary...'}
 
@@ -569,6 +596,11 @@ class ItenaryRecommendationSystem:
                     'token_usage': token_usage,
                     'data': {'detailed_itinerary': itinerary},
                 }
+                lf_update_span(output={
+                    'days': len(built_days),
+                    'input_tokens': (token_usage or {}).get('input_token', 0),
+                    'output_tokens': (token_usage or {}).get('output_token', 0),
+                })
             yield {'event': 'complete', 'data': result}
 
         except Exception as e:
@@ -577,6 +609,7 @@ class ItenaryRecommendationSystem:
             traceback.print_exc()
             yield {'event': 'error', 'message': str(e)}
         finally:
+            _propagate_ctx.__exit__(None, None, None)
             if _stream_span:
                 _stream_span.__exit__(None, None, None)
 
@@ -587,7 +620,7 @@ class ItenaryRecommendationSystem:
             user_preferences['suggested_places'] = user_preferences.get('suggested_places', [])
             user_preferences['budget'] = user_preferences.get('budget', "")
 
-            with lf_span("edit_itinerary", as_type="generation"):
+            with lf_span("edit_itinerary", input=safe_prefs(user_preferences)):
                 with _lf_propagate(
                     user_id=str(user_preferences.get('_user_id') or ''),
                     session_id=str(user_preferences.get('_session_id') or ''),
@@ -632,13 +665,19 @@ class ItenaryRecommendationSystem:
                     hotels_trimmed = self._trim_for_prompt(hotels, self._HOTEL_COLS_PROMPT, 10)
                     rests_trimmed  = _llm.truncate_text_cols(self._trim_for_prompt(restaurants, self._REST_COLS_PROMPT, 15), max_chars=50)
 
-                    with lf_span("llm_generation"):
-                        messages = generate_edit_itinerary_prompt(
-                            user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names,
-                            rest_slot_counts=rest_slots,
-                        )
-                        print(f"Edit prompt length: {sum(len(m['content']) for m in messages)} chars")
+                    messages = generate_edit_itinerary_prompt(
+                        user_preferences, places_trimmed, rests_trimmed, hotels_trimmed, place_names,
+                        rest_slot_counts=rest_slots,
+                    )
+                    print(f"Edit prompt length: {sum(len(m['content']) for m in messages)} chars")
 
+                    with lf_span("llm_generation", input={
+                        'destination': user_preferences.get('places_of_interest', ''),
+                        'trip_type': user_preferences.get('trip_type', ''),
+                        'trip_duration': user_preferences.get('trip_duration', ''),
+                        'edit_places_count': len(place_names),
+                        'prompt_chars': sum(len(m['content']) for m in messages),
+                    }):
                         response = self.client.responses.create(
                             model=self.chat_deployment,
                             input=messages,
@@ -667,13 +706,27 @@ class ItenaryRecommendationSystem:
                             itinerary, user_preferences, places_trimmed, rests_trimmed, hotels_trimmed,
                             rest_slot_counts=rest_slots,
                         )
+                        _edit_token_usage = itinerary.get('_token_usage') or {} if isinstance(itinerary, dict) else {}
+                        lf_update_span(output={
+                            'input_tokens': _edit_token_usage.get('input_token', 0),
+                            'output_tokens': _edit_token_usage.get('output_token', 0),
+                        })
 
-                    with lf_span("finalization"):
-                        return self._finalize_itinerary(
+                    with lf_span("finalization", input={
+                        'city': itinerary.get('city', '') if isinstance(itinerary, dict) else '',
+                        'days': len(itinerary.get('itinerary', [])) if isinstance(itinerary, dict) else 0,
+                    }):
+                        result = self._finalize_itinerary(
                             itinerary, places,
                             start_date=user_preferences.get('start_date'),
                             user_preferences=user_preferences,
                         )
+                        _edit_out_days = len(
+                            (result.get('data') or {}).get('detailed_itinerary', {}).get('itinerary', [])
+                        ) if isinstance(result, dict) else 0
+                        lf_update_span(output={'status': 'success', 'days': _edit_out_days})
+
+                return result
 
         except (KeyError, IndexError, TypeError) as e:
             print("Error while processing edit:", e)
