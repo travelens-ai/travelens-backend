@@ -37,3 +37,4 @@ flasgger
 APScheduler==3.10.4
 langfuse>=2.0.0
 sentry-sdk[flask]>=2.0.0
+firebase-admin>=6.5.0

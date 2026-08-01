@@ -130,3 +130,75 @@ def update_token_user():
 
     _, (status, msg, code) = service.update_user_id(device_id=device_id, user_id=user_id)
     return jsonify({"status": status, "message": msg}), code
+
+
+@messaging_bp.route("/send-notification", methods=["POST"])
+def send_notification():
+    """Send a Firebase push notification to a target audience
+
+    Targeting precedence: an explicit `token` wins; otherwise a
+    `device_id`/`user_id` filter is used; with none of those, the notification
+    is broadcast to every registered device. Invalid tokens are pruned.
+    ---
+    tags:
+      - Messaging
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - title
+            - body
+          properties:
+            title:
+              type: string
+              example: "Weekend getaway ideas"
+            body:
+              type: string
+              example: "Discover the best places to visit near you this weekend."
+            data:
+              type: object
+              description: Optional string key/values delivered with the push
+              example: {"screen": "explore", "city": "Goa"}
+            token:
+              type: string
+              description: Send to this single FCM token only
+            device_id:
+              type: string
+              description: Send to all tokens for this device
+            user_id:
+              type: string
+              description: Send to all tokens for this user
+    responses:
+      200:
+        description: Notification(s) sent
+      400:
+        description: Missing title/body
+      404:
+        description: No registered tokens for the given target
+      500:
+        description: Send failure
+    """
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "Request body is required"}), 400
+
+    title = data.get("title")
+    body = data.get("body")
+    if not title and not body:
+        return jsonify({"status": "error", "message": "title or body is required"}), 400
+
+    result, (status, msg, code) = service.send_notification(
+        title=title,
+        body=body,
+        data=data.get("data"),
+        token=data.get("token"),
+        device_id=data.get("device_id"),
+        user_id=data.get("user_id"),
+    )
+    payload = {"status": status, "message": msg}
+    if result is not None:
+        payload["result"] = result
+    return jsonify(payload), code

@@ -1,4 +1,76 @@
 from core.db import get_connection
+from integrations import firebase
+
+
+def _resolve_tokens(*, device_id=None, user_id=None):
+    """Return a list of distinct fcm_token strings from device_tokens matching
+    the given filter. With neither device_id nor user_id, returns every token
+    (broadcast). Duplicates are removed so a device isn't notified twice."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        sql = "SELECT DISTINCT fcm_token FROM device_tokens WHERE fcm_token IS NOT NULL"
+        params = []
+        if device_id is not None:
+            sql += " AND device_id = ?"
+            params.append(device_id)
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(user_id)
+        cursor.execute(sql, params)
+        return [r[0] for r in cursor.fetchall() if r[0]]
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _prune_tokens(tokens):
+    """Delete rows whose fcm_token FCM reported as invalid/unregistered."""
+    if not tokens:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.executemany(
+            "DELETE FROM device_tokens WHERE fcm_token = ?",
+            [(t,) for t in tokens],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def send_notification(*, title, body, data=None, token=None, device_id=None, user_id=None):
+    """Send an FCM push notification to a target audience. Targeting precedence:
+    an explicit `token` > `device_id`/`user_id` filter > broadcast to all.
+    Invalid tokens FCM rejects are pruned from device_tokens. Returns
+    (result, (status, message, code)) where result is a dict of send counts."""
+    try:
+        if token:
+            msg_id = firebase.send_to_token(token, title=title, body=body, data=data)
+            return {"success": 1, "failure": 0, "message_id": msg_id}, (
+                "success", "Notification sent", 200,
+            )
+
+        tokens = _resolve_tokens(device_id=device_id, user_id=user_id)
+        if not tokens:
+            return None, ("error", "No registered tokens for the given target", 404)
+
+        success, failure, invalid = firebase.send_to_tokens(
+            tokens, title=title, body=body, data=data
+        )
+        _prune_tokens(invalid)
+        return {
+            "success": success,
+            "failure": failure,
+            "targeted": len(tokens),
+            "pruned": len(invalid),
+        }, ("success", "Notifications sent", 200)
+    except Exception as e:
+        return None, ("error", str(e), 500)
 
 
 def save_token(*, device_id, fcm_token, user_id=None):

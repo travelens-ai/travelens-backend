@@ -61,5 +61,14 @@ os.environ.setdefault("OTEL_BSP_SCHEDULE_DELAY", "2000")
 os.environ.setdefault("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", "64")
 os.environ.setdefault("OTEL_BSP_EXPORT_TIMEOUT", "10000")
 
+# Firebase Cloud Messaging (push notifications). Provide the service-account
+# credential ONE of two ways (checked in this order by integrations/firebase.py):
+#   FIREBASE_CREDENTIALS_JSON  — the raw service-account JSON (handy for prod
+#                                secrets managers where a file path is awkward)
+#   FIREBASE_CREDENTIALS_FILE  — path to the service-account .json on disk
+# If neither is set, Firebase falls back to Application Default Credentials.
+FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
+FIREBASE_CREDENTIALS_FILE = os.getenv("FIREBASE_CREDENTIALS_FILE", "")
+
 # Server
 PORT = int(os.environ.get("PORT", 4000))
