@@ -487,6 +487,104 @@ def get_available_places_for_itinerary(itinerary_id):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@itinerary_bp.route("/share-itinerary", methods=["POST"])
+def share_itinerary():
+    """Share an itinerary with another user or device
+    ---
+    tags:
+      - Travel
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [itinerary_id]
+          properties:
+            itinerary_id:
+              type: integer
+              example: 123
+            receiver_user_id:
+              type: integer
+              description: receiver's user id (for a logged-in receiver)
+            receiver_device_id:
+              type: string
+              description: receiver's device id (for an anonymous receiver)
+    responses:
+      201:
+        description: Share recorded
+      400:
+        description: Missing itinerary_id or receiver
+      404:
+        description: Itinerary not found
+    """
+    body = request.json or {}
+
+    result, (_status, msg, code) = itinerary_service.share_itinerary(
+        receiver_user_id=body.get("receiver_user_id"),
+        receiver_device_id=body.get("receiver_device_id"),
+        itinerary_id=body.get("itinerary_id"),
+    )
+    if result is not None:
+        return jsonify({"status": "success", "data": result}), code
+    return jsonify({"status": "error", "message": msg}), code
+
+
+@itinerary_bp.route("/shared-itineraries", methods=["GET"])
+def get_shared_itineraries():
+    """List itineraries shared with the current user/device (with itinerary details)
+    ---
+    tags:
+      - Travel
+    responses:
+      200:
+        description: List of shared itineraries, each joined with its itinerary
+      401:
+        description: No identity on the request
+    """
+    # Receiver = the authenticated caller (user id if logged in, else device id).
+    receiver_user_id = getattr(request, "user_id", None)
+    receiver_device_id = getattr(request, "device_id", None)
+
+    result, (_status, msg, code) = itinerary_service.get_shared_itineraries(
+        receiver_user_id=receiver_user_id,
+        receiver_device_id=receiver_device_id,
+    )
+    if result is not None:
+        return jsonify({"status": "success", "data": result}), code
+    return jsonify({"status": "error", "message": msg}), code
+
+
+@itinerary_bp.route("/itinerary/<int:itinerary_id>", methods=["GET"])
+def get_itinerary(itinerary_id):
+    """Get a stored itinerary by its id
+    ---
+    tags:
+      - Travel
+    parameters:
+      - in: path
+        name: itinerary_id
+        type: integer
+        required: true
+        description: ID returned from generate-itinerary or the SSE done event
+    responses:
+      200:
+        description: The stored itinerary (request + response)
+      404:
+        description: Itinerary not found
+    """
+    request_json, response_json = itinerary_service.get_itinerary_by_id(itinerary_id)
+    if request_json is None and response_json is None:
+        return jsonify({"status": "error", "message": "Itinerary not found"}), 404
+
+    response = with_image_urls(response_json) if isinstance(response_json, dict) else response_json
+    if isinstance(response, dict):
+        response["itinerary_id"] = itinerary_id
+        _fix_total_days(response)
+        _inject_itinerary_ads(response)
+    return jsonify(_sanitize_nan(response)), 200
+
+
 @itinerary_bp.route("/popular-destination", methods=["GET"])
 def get_popular_destination():
     """Get popular destinations

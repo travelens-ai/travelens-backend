@@ -169,6 +169,109 @@ def get_session_id(itinerary_id):
     return None
 
 
+def share_itinerary(*, receiver_user_id, receiver_device_id, itinerary_id):
+    """Record an itinerary shared with a receiver.
+
+    A share is identified only by its receiver + itinerary_id (no sender). The
+    receiver is a logged-in user (receiver_user_id, optional) OR an anonymous
+    device (receiver_device_id); at least one must be given. Validates that the
+    itinerary exists. Returns ({...row}, (status, msg, code))."""
+    if not itinerary_id:
+        return None, ("error", "itinerary_id is required", 400)
+    if receiver_user_id is None and not receiver_device_id:
+        return None, ("error", "receiver_user_id or receiver_device_id is required", 400)
+    if not is_db_ready():
+        return None, ("error", "Database is connecting, please try again shortly", 503)
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM itineraries WHERE id = ?", (itinerary_id,))
+        if cursor.fetchone() is None:
+            return None, ("error", "Itinerary not found", 404)
+
+        cursor.execute(
+            "INSERT INTO shared_itineraries "
+            "(receiver_user_id, receiver_device_id, itinerary_id) "
+            "OUTPUT INSERTED.id VALUES (?, ?, ?)",
+            (receiver_user_id, receiver_device_id, itinerary_id),
+        )
+        new_id = int(cursor.fetchone()[0])
+        conn.commit()
+        return (
+            {
+                "id": new_id,
+                "receiver_user_id": receiver_user_id,
+                "receiver_device_id": receiver_device_id,
+                "itinerary_id": itinerary_id,
+            },
+            ("success", "Shared", 201),
+        )
+    except Exception as e:
+        conn.rollback()
+        return None, ("error", str(e), 500)
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_shared_itineraries(*, receiver_user_id, receiver_device_id):
+    """Itineraries shared *with* the given receiver, joined to the itinerary row.
+
+    Matches on whichever receiver identity the caller has (user id for a
+    logged-in user, else device id). Each entry carries the share metadata plus
+    the parsed itinerary request/response JSON. Returns (list, (status,...))."""
+    if receiver_user_id is None and not receiver_device_id:
+        return None, ("error", "No receiver identity on the request", 401)
+    if not is_db_ready():
+        return None, ("error", "Database is connecting, please try again shortly", 503)
+
+    if receiver_user_id is not None:
+        where, param = "s.receiver_user_id = ?", receiver_user_id
+    else:
+        where, param = "s.receiver_device_id = ?", receiver_device_id
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT s.id, "
+            "s.receiver_user_id, s.receiver_device_id, s.itinerary_id, s.created_at, "
+            "i.request_json, i.response_json, i.status, i.created_at AS itinerary_created_at "
+            "FROM shared_itineraries s "
+            "LEFT JOIN itineraries i ON s.itinerary_id = i.id "
+            f"WHERE {where} "
+            "ORDER BY s.id DESC",
+            (param,),
+        )
+        rows = cursor.fetchall()
+        data = []
+        for r in rows:
+            (sid, r_uid, r_did, itin_id, created_at,
+             req_json, resp_json, itin_status, itin_created) = r
+            data.append({
+                "id": sid,
+                "receiver_user_id": r_uid,
+                "receiver_device_id": r_did,
+                "itinerary_id": itin_id,
+                "created_at": created_at.isoformat() if created_at else None,
+                "itinerary": {
+                    "id": itin_id,
+                    "status": itin_status,
+                    "request_json": json.loads(req_json) if req_json else None,
+                    "response_json": json.loads(resp_json) if resp_json else None,
+                    "created_at": itin_created.isoformat() if itin_created else None,
+                } if req_json is not None or resp_json is not None else None,
+            })
+        return data, ("success", "OK", 200)
+    except Exception as e:
+        print(f"Failed to fetch shared itineraries: {e}")
+        return None, ("error", str(e), 500)
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def get_itinerary_by_id(itinerary_id):
     """Return (request_json_dict, response_json_dict) for a stored itinerary, or (None, None)."""
     if not itinerary_id or not is_db_ready():
