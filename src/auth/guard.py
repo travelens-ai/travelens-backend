@@ -33,6 +33,9 @@ EXEMPT_PATHS = {
 
 # Path prefixes that never require auth (Swagger UI + spec, static, CORS
 # preflight lands here too via method check below).
+# NOTE: /admin is exempt from the app-user/device guard because admin routes
+# enforce their own admin JWT via auth.admin.admin_required — the global guard
+# here only understands user/device tokens, which admins don't carry.
 EXEMPT_PREFIXES = (
     "/docs",
     "/apidocs",
@@ -40,7 +43,8 @@ EXEMPT_PREFIXES = (
     "/flasgger_static",
     "/swagger",
     "/static",
-    "/get-messaging"
+    "/get-messaging",
+    "/admin"
 )
 
 

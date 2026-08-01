@@ -32,7 +32,9 @@ from core.langfuse_client import get_langfuse as _get_langfuse
 from core.swagger_config import swagger_template, swagger_config
 from core.db import init_db_async
 from auth import auth_bp
+from auth.admin import admin_auth_bp
 from auth.guard import authenticate_request
+from features.admin import admin_bp
 from features.itinerary import itinerary_bp
 from features.itinerary.service import initialize_recommender, is_initialized
 from features.places import places_bp
@@ -89,6 +91,8 @@ app.register_blueprint(search_bp)
 app.register_blueprint(config_bp)
 app.register_blueprint(feedback_bp)
 app.register_blueprint(messaging_bp)
+app.register_blueprint(admin_auth_bp)
+app.register_blueprint(admin_bp)
 
 init_db_async()
 initialize_recommender()
