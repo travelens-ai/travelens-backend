@@ -151,7 +151,7 @@ def _split_feedback_row(cols, row):
 
 
 # --- place images (custom, not generic CRUD) --------------------------------
-def list_place_images(*, page, limit, search, only_unmoderated=True):
+def list_place_images(*, page, limit, search, moderated=None):
     """Paged list of place images, joined to the place each belongs to.
 
     Sourced from place_image_map → images (+ places). Each row carries the
@@ -160,14 +160,17 @@ def list_place_images(*, page, limit, search, only_unmoderated=True):
     image name or place name. `image_id` is the id passed to the delete/moderate
     endpoints.
 
-    only_unmoderated=True (default) returns just the review queue
-    (images.moderated = 0); False returns every image regardless of moderation.
+    `moderated` filters by moderation state:
+      None  → all images (no filter)
+      True  → only moderated images (images.moderated = 1)
+      False → only un-moderated images (the review queue, moderated = 0)
     """
     offset = (page - 1) * limit
 
-    # Only-unreviewed filter (the review queue) unless the caller wants all.
     clauses, params = [], []
-    if only_unmoderated:
+    if moderated is True:
+        clauses.append("ISNULL(i.moderated, 0) = 1")
+    elif moderated is False:
         clauses.append("ISNULL(i.moderated, 0) = 0")
     if search:
         clauses.append("(i.image_name LIKE ? OR p.name LIKE ?)")

@@ -142,8 +142,11 @@ GET    /admin/place-images?search=<q>   # top 100 moderated=0 images
       "place": { "id": 7644, "name": "..." }   // null if the place is missing
     } ], "total": <int>, "page": <int>, "limit": <int>, "status": true }
 
-GET    /admin/place-images/all?page=1&limit=20&search=<q>   # ALL images (moderated + not)
+GET    /admin/place-images/all?page=1&limit=20&search=<q>&moderated=<bool>
 → same row shape as above; paged (limit 1..100). `moderated` is true/false per row.
+       ?moderated=true  → only moderated images
+       ?moderated=false → only un-moderated images
+       (omit)           → all images
 
 POST   /admin/place-images/moderate   { "image_ids": [36080, 36081], "moderated": true }
 → { "data": { "updated": [36080, 36081], "not_found": [], "moderated": true, "count": 2 },

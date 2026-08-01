@@ -62,6 +62,19 @@ def _parse_paging():
     return page, limit
 
 
+def _parse_bool(value):
+    """Tri-state parse of a query param: None when absent/unrecognized, else the
+    bool. 'true'/'1'/'yes' → True; 'false'/'0'/'no' → False (case-insensitive)."""
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if v in ("true", "1", "yes"):
+        return True
+    if v in ("false", "0", "no"):
+        return False
+    return None
+
+
 # --- Swagger specs -----------------------------------------------------------
 # Flasgger only documents a view whose __doc__ has a YAML `---` block. The
 # registry-driven views below are generated in factories, so we build each one's
@@ -232,7 +245,9 @@ def place_images_list():
     # Fixed top-100 window (no pagination) — the review queue only needs the
     # most recent batch to work through at a time.
     search = request.args.get("search")
-    result, (_status, msg, code) = service.list_place_images(page=1, limit=100, search=search)
+    result, (_status, msg, code) = service.list_place_images(
+        page=1, limit=100, search=search, moderated=False
+    )
     if result is not None:
         return jsonify(result), code
     return jsonify({"message": msg}), code
@@ -258,6 +273,12 @@ def place_images_list_all():
         default: 20
         description: 1..100
       - in: query
+        name: moderated
+        type: boolean
+        description: >
+          true → only moderated images; false → only un-moderated;
+          omit → all images
+      - in: query
         name: search
         type: string
         description: case-insensitive match on image name or place name
@@ -270,8 +291,9 @@ def place_images_list_all():
     """
     page, limit = _parse_paging()
     search = request.args.get("search")
+    moderated = _parse_bool(request.args.get("moderated"))
     result, (_status, msg, code) = service.list_place_images(
-        page=page, limit=limit, search=search, only_unmoderated=False
+        page=page, limit=limit, search=search, moderated=moderated
     )
     if result is not None:
         return jsonify(result), code

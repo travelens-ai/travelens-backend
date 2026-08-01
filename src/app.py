@@ -49,7 +49,25 @@ from features.feedback import feedback_bp
 from features.messaging import messaging_bp
 
 app = Flask(__name__)
-CORS(app)
+
+# CORS: allow the admin/frontend origins to call the API (incl. Authorization
+# header + credentials). Origins come from CORS_ORIGINS (comma-separated) so
+# prod can override without a code change; defaults cover the travelens domains.
+_cors_origins = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "https://api.travelens.in,https://travelens.in,https://www.travelens.in",
+    ).split(",")
+    if o.strip()
+]
+CORS(
+    app,
+    resources={r"/*": {"origins": _cors_origins}},
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization", "X-Device-Token"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+)
 
 try:
     _server_ip = socket.gethostbyname(socket.gethostname())
