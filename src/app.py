@@ -57,7 +57,8 @@ _cors_origins = [
     o.strip()
     for o in os.getenv(
         "CORS_ORIGINS",
-        "https://api.travelens.in,https://travelens.in,https://www.travelens.in",
+        "https://admin.travelens.in,https://api.travelens.in,"
+        "https://travelens.in,https://www.travelens.in",
     ).split(",")
     if o.strip()
 ]
