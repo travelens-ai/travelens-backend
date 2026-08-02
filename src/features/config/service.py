@@ -169,9 +169,13 @@ APP_CONFIG = {
                 "next": "Next",
                 # Planner step 3
                 "step3Of3": "Step 3 of 3",
-                "preferencesAndActivities": "Preferences & Activities",
-                "foodPreferences": "Food Preferences",
+                "preferences": "Preferences",
                 "activities": "Activities",
+                "foodPreferences": "Food Preferences",
+                "foodType": "Food Type",
+                "accommodationPreference": "Accommodation Preference",
+                "tripType": "Travel Pace",
+                "inerests": "Interests",
                 "tripSummary": "Trip Summary",
                 "destination": "Destination",
                 "dates": "Dates",
@@ -523,21 +527,26 @@ APP_CONFIG = {
 def _load_lookups():
     """Fetch the lookup lists from the database. Returns empty lists for any
     table that errors so the rest of the config still serves."""
+    # group_types / food_preferences keep their legacy string-array shape for the
+    # live app; a parallel *_with_icons list carries {name, icon} objects so new
+    # clients can render icons without breaking the old response contract.
     try:
-        group_types = [r["name"] for r in fetch_dicts(
-            "SELECT name FROM group_types ORDER BY id"
-        )]
+        group_types_rows = fetch_dicts("SELECT name, icon FROM group_types ORDER BY id")
+        group_types = [r["name"] for r in group_types_rows]
+        group_types_with_icons = [{"name": r["name"], "icon": r["icon"]} for r in group_types_rows]
     except Exception as e:
         print(f"[config] failed to load group_types: {e}")
         group_types = []
+        group_types_with_icons = []
 
     try:
-        food_preferences = [r["name"] for r in fetch_dicts(
-            "SELECT name FROM food_preferences ORDER BY id"
-        )]
+        food_preferences_rows = fetch_dicts("SELECT name, icon FROM food_preferences ORDER BY id")
+        food_preferences = [r["name"] for r in food_preferences_rows]
+        food_preferences_with_icons = [{"name": r["name"], "icon": r["icon"]} for r in food_preferences_rows]
     except Exception as e:
         print(f"[config] failed to load food_preferences: {e}")
         food_preferences = []
+        food_preferences_with_icons = []
 
     try:
         trip_types = [
@@ -583,16 +592,20 @@ def _load_lookups():
         print(f"[config] failed to load popular_states: {e}")
         popular_states = []
 
-    return (group_types, food_preferences, trip_types, food_types,
+    return (group_types, group_types_with_icons, food_preferences,
+            food_preferences_with_icons, trip_types, food_types,
             accommodation_preferences, activities, popular_states)
 
 
 def _build_config():
-    (group_types, food_preferences, trip_types, food_types,
+    (group_types, group_types_with_icons, food_preferences,
+     food_preferences_with_icons, trip_types, food_types,
      accommodation_preferences, activities, popular_states) = _load_lookups()
     config = dict(APP_CONFIG)
     config["group_types"] = group_types
+    config["group_types_with_icons"] = group_types_with_icons
     config["food_preferences"] = food_preferences
+    config["food_preferences_with_icons"] = food_preferences_with_icons
     config["trip_types"] = trip_types
     config["food_types"] = food_types
     config["accommodation_preferences"] = accommodation_preferences

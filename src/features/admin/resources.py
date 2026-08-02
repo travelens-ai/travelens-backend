@@ -27,7 +27,7 @@ RESOURCES = {
     "food-preferences": {
         "table": "food_preferences",
         "pk": "id",
-        "writable": ["name"],
+        "writable": ["name", "icon"],
         "search": ["name"],
         "hidden": [],
         "methods": _FULL,
@@ -36,7 +36,7 @@ RESOURCES = {
     "group-types": {
         "table": "group_types",
         "pk": "id",
-        "writable": ["name"],
+        "writable": ["name", "icon"],
         "search": ["name"],
         "hidden": [],
         "methods": _FULL,
