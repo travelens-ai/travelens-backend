@@ -540,6 +540,33 @@ def _load_lookups():
         food_preferences = []
 
     try:
+        trip_types = [
+            {"name": r["name"], "icon": r["icon"]}
+            for r in fetch_dicts("SELECT name, icon FROM trip_types ORDER BY id")
+        ]
+    except Exception as e:
+        print(f"[config] failed to load trip_types: {e}")
+        trip_types = []
+
+    try:
+        food_types = [
+            {"name": r["name"], "icon": r["icon"]}
+            for r in fetch_dicts("SELECT name, icon FROM food_types ORDER BY id")
+        ]
+    except Exception as e:
+        print(f"[config] failed to load food_types: {e}")
+        food_types = []
+
+    try:
+        accommodation_preferences = [
+            {"name": r["name"], "icon": r["icon"]}
+            for r in fetch_dicts("SELECT name, icon FROM accommodation_preferences ORDER BY id")
+        ]
+    except Exception as e:
+        print(f"[config] failed to load accommodation_preferences: {e}")
+        accommodation_preferences = []
+
+    try:
         activities = [
             {"id": r["ref_id"], "name": r["name"], "icon": r["icon"]}
             for r in fetch_dicts("SELECT ref_id, name, icon FROM activities ORDER BY id")
@@ -556,14 +583,19 @@ def _load_lookups():
         print(f"[config] failed to load popular_states: {e}")
         popular_states = []
 
-    return group_types, food_preferences, activities, popular_states
+    return (group_types, food_preferences, trip_types, food_types,
+            accommodation_preferences, activities, popular_states)
 
 
 def _build_config():
-    group_types, food_preferences, activities, popular_states = _load_lookups()
+    (group_types, food_preferences, trip_types, food_types,
+     accommodation_preferences, activities, popular_states) = _load_lookups()
     config = dict(APP_CONFIG)
     config["group_types"] = group_types
     config["food_preferences"] = food_preferences
+    config["trip_types"] = trip_types
+    config["food_types"] = food_types
+    config["accommodation_preferences"] = accommodation_preferences
     config["activities"] = activities
     config["budgetType"] = [
         {
