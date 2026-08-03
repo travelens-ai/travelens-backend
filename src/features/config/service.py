@@ -502,7 +502,7 @@ APP_CONFIG = {
     # client. `title` is the subject line where the share target supports one;
     # `image` is a banner to attach on channels that support media.
     "share_itinerary": {
-        "title": "My {days}-day${s} {destination} itinerary, built with Travelens",
+        "title": "My {days}-day{s} {destination} itinerary, built with Travelens",
         "message": "I generated a {days}-day {destination} itinerary on Travelens, the AI trip planner. Check it out and plan yours: {link}"
     },
     # Expected itinerary-generation time shown to the client as a countdown/progress
