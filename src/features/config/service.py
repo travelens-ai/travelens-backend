@@ -497,6 +497,14 @@ APP_CONFIG = {
     "itinerary": {
         "type": "normal"
     },
+    # Message the client uses when the user shares an itinerary (native share sheet
+    # / deep link). Placeholders {destination}, {days}, {link} are filled by the
+    # client. `title` is the subject line where the share target supports one;
+    # `image` is a banner to attach on channels that support media.
+    "share_itinerary": {
+        "title": "My {days}-day${s} {destination} itinerary, built with Travelens",
+        "message": "I generated a {days}-day {destination} itinerary on Travelens, the AI trip planner. Check it out and plan yours: {link}"
+    },
     # Expected itinerary-generation time shown to the client as a countdown/progress
     # hint. Base is 25s for a 3-day trip; each day beyond 3 adds 4s. The client
     # computes: baseSeconds + max(0, days - baseDays) * perExtraDaySeconds.
