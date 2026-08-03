@@ -308,7 +308,7 @@ APP_CONFIG = {
             "texts": {
                 # Loader
                 "loaderTitle": "Curating your dream journey...",
-                "loaderSubtitle": "Powered by AI magic",
+                "loaderSubtitle": "Powered by Travelens AI",
                 "craftingJourney": "Crafting your journey",
                 "loaderIconDestinations": "Destinations",
                 "loaderIconHotels": "Hotels",
@@ -497,29 +497,38 @@ APP_CONFIG = {
     "itinerary": {
         "type": "normal"
     },
+    # Expected itinerary-generation time shown to the client as a countdown/progress
+    # hint. Base is 25s for a 3-day trip; each day beyond 3 adds 4s. The client
+    # computes: baseSeconds + max(0, days - baseDays) * perExtraDaySeconds.
+    "itinerary_generation_time": {
+        "baseDays": 3,
+        "baseSeconds": 25,
+        "perExtraDaySeconds": 4,
+        "unit": "seconds",
+    },
     # Rotating labels shown on the itinerary-generation loader. The client cycles
     # through these while the itinerary streams.
     "itinerary_loader_labels": [
-        {"title": "Curating your dream journey...", "subTitle": "Powered by AI magic"},
-        {"title": "Mapping your perfect route...", "subTitle": "Powered by AI magic"},
-        {"title": "Handpicking must-see places...", "subTitle": "Powered by AI magic"},
-        {"title": "Finding hidden gems for you...", "subTitle": "Powered by AI magic"},
-        {"title": "Planning day-by-day adventures...", "subTitle": "Powered by AI magic"},
-        {"title": "Booking the best experiences...", "subTitle": "Powered by AI magic"},
-        {"title": "Discovering local flavors...", "subTitle": "Powered by AI magic"},
-        {"title": "Pairing stays with your vibe...", "subTitle": "Powered by AI magic"},
-        {"title": "Balancing your itinerary...", "subTitle": "Powered by AI magic"},
-        {"title": "Optimizing travel times...", "subTitle": "Powered by AI magic"},
-        {"title": "Sprinkling in some surprises...", "subTitle": "Powered by AI magic"},
-        {"title": "Tailoring trips to your taste...", "subTitle": "Powered by AI magic"},
-        {"title": "Scouting the finest spots...", "subTitle": "Powered by AI magic"},
-        {"title": "Crafting unforgettable moments...", "subTitle": "Powered by AI magic"},
-        {"title": "Aligning stars for your trip...", "subTitle": "Powered by AI magic"},
-        {"title": "Matching places to your mood...", "subTitle": "Powered by AI magic"},
-        {"title": "Weaving your travel story...", "subTitle": "Powered by AI magic"},
-        {"title": "Adding a dash of adventure...", "subTitle": "Powered by AI magic"},
-        {"title": "Fine-tuning every detail...", "subTitle": "Powered by AI magic"},
-        {"title": "Almost ready to explore...", "subTitle": "Powered by AI magic"},
+        {"title": "Curating your dream journey...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Mapping your perfect route...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Handpicking must-see places...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Finding hidden gems for you...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Planning day-by-day adventures...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Booking the best experiences...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Discovering local flavors...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Pairing stays with your vibe...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Balancing your itinerary...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Optimizing travel times...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Sprinkling in some surprises...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Tailoring trips to your taste...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Scouting the finest spots...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Crafting unforgettable moments...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Aligning stars for your trip...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Matching places to your mood...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Weaving your travel story...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Adding a dash of adventure...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Fine-tuning every detail...", "subTitle": "Powered by Travelens AI"},
+        {"title": "Almost ready to explore...", "subTitle": "Powered by Travelens AI"},
     ],
 }
 
