@@ -158,6 +158,14 @@ def send_notification():
             body:
               type: string
               example: "Discover the best places to visit near you this weekend."
+            image:
+              type: string
+              description: Optional banner image URL shown in the notification
+              example: "https://travelens.in/app/assets/weekend-banner.png"
+            link:
+              type: string
+              description: Optional deep-link URL opened when the notification is tapped (delivered in data as `link`)
+              example: "travelens://itinerary/123"
             data:
               type: object
               description: Optional string key/values delivered with the push
@@ -197,6 +205,8 @@ def send_notification():
         token=data.get("token"),
         device_id=data.get("device_id"),
         user_id=data.get("user_id"),
+        image=data.get("image"),
+        link=data.get("link"),
     )
     payload = {"status": status, "message": msg}
     if result is not None:

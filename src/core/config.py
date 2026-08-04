@@ -69,6 +69,10 @@ os.environ.setdefault("OTEL_BSP_EXPORT_TIMEOUT", "10000")
 # If neither is set, Firebase falls back to Application Default Credentials.
 FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
 FIREBASE_CREDENTIALS_FILE = os.getenv("FIREBASE_CREDENTIALS_FILE", "")
+# Explicit FCM project id. Only needed when the credential doesn't carry one
+# (e.g. Application Default Credentials); with a service-account JSON/file the
+# project id is read from the credential itself. Falls back to GOOGLE_CLOUD_PROJECT.
+FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "") or os.getenv("GOOGLE_CLOUD_PROJECT", "")
 
 # Server
 PORT = int(os.environ.get("PORT", 4000))

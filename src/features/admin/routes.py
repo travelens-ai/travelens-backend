@@ -22,6 +22,7 @@ from core.db import is_db_ready
 from auth.admin.jwt_utils import admin_required
 from features.admin import service
 from features.admin.resources import RESOURCES
+from features.messaging import service as messaging_service
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -405,6 +406,59 @@ def place_images_delete(image_id):
     """
     result, (_status, msg, code) = service.delete_place_image(image_id)
     if result is not False:
+        return jsonify({"data": result}), code
+    return jsonify({"message": msg}), code
+
+
+@admin_bp.route("/admin/generate-notification-copy", methods=["POST"])
+@admin_required
+def generate_notification_copy():
+    """Generate a push-notification title and body from a prompt using AI
+
+    Admin helper: given a short campaign description, returns AI-written
+    `title` and `body` plus a target `type`, a https://travelens.in/ deep-link
+    `link`, and a banner `image` URL — all for the admin to review/edit before
+    sending via /send-notification. Does not send anything.
+    ---
+    tags:
+      - Admin: Notifications
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [prompt]
+          properties:
+            prompt:
+              type: string
+              description: What the notification is about (campaign/intent)
+              example: "Weekend getaway deals near Goa, 30% off hotels"
+            tone:
+              type: string
+              description: Optional style hint (e.g. exciting, urgent, friendly)
+              example: "exciting"
+    responses:
+      200:
+        description: >
+          {data:{title, body, type, link, image}, status:true} — type is the
+          target screen, link is a https://travelens.in/... deep link, image is
+          a banner URL.
+      400:
+        description: Missing prompt
+      502:
+        description: Model returned empty/malformed copy
+      401:
+        description: Missing or invalid admin token
+    """
+    data = request.json or {}
+    result, (_status, msg, code) = messaging_service.generate_notification_copy(
+        prompt=data.get("prompt"),
+        tone=data.get("tone"),
+    )
+    if result is not None:
         return jsonify({"data": result}), code
     return jsonify({"message": msg}), code
 
