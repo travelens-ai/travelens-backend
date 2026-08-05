@@ -40,6 +40,12 @@ jobs:
           path: |
             .
             !antenv/
+            !.git/
+            !**/__pycache__/
+            !**/*.pyc
+
+            !generated_images/
+          retention-days: 1
 
       # 🚫 Opting Out of Oryx Build
       # If you prefer to disable the Oryx build process during deployment, follow these steps:
