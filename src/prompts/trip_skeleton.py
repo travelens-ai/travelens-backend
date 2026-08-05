@@ -18,7 +18,7 @@ The user's preferred tier is "{tier}". Make `selected` the best match for that t
 ## Rules
 1. Output ONLY the trip-level fields below — do NOT include any day-by-day `itinerary` array.
 2. Hotels are GROUPED by city. If the trip covers one city, provide one group. If multi-city (e.g. Rajasthan covering Jaipur + Jodhpur), provide one group per city with the correct from_day/to_day range.
-3. Each hotel group has `selected` (best pick for user's tier) and `alternatives` (1–2 other tier options). Pick from the Hotels Dataset; use your knowledge only if a tier has no dataset candidate.
+3. Each hotel group has `selected` (best pick) and `alternatives` (1–2 options of the SAME accommodation type — all 3 must be the same property type as the user requested). Pick from the Hotels Dataset; use your knowledge if dataset is thin.
 4. `description` is a short, engaging 2-3 sentence overview of the whole trip.
 5. `price_estimated_range` is the total per-head estimate; keep within the user's budget if realistic, else show the real range.
 6. Provide 2-4 `similar_places`."""
@@ -31,22 +31,47 @@ def generate_trip_skeleton_prompt(user_preferences, top_places, top_restaurants,
     trip_duration = user_preferences['trip_duration']
     _raw_pref = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or 'mid').strip().lower()
     hotel_pref = BUDGET_TIER_MAP.get(_raw_pref, _raw_pref)
+    food_type = user_preferences.get('food_type', '').strip()
+    accom_pref = user_preferences.get('accommodation_preference', '').strip()
+
+    hard_constraints = []
+    if food_type:
+        hard_constraints.append(
+            f"- DIETARY RESTRICTION: \"{food_type}\". Only suggest restaurants that serve {food_type} food."
+        )
+    if accom_pref:
+        hard_constraints.append(
+            f"- ACCOMMODATION TYPE: \"{accom_pref}\". You MUST suggest {accom_pref}-type properties only. "
+            f"The Hotels Dataset is a reference — judge each listed option on quality and fit. "
+            f"If the dataset is thin or empty, use your knowledge of real well-reviewed {accom_pref} stays "
+            f"at {hotel_pref} budget for this destination. Never substitute a different property type."
+        )
+    hard_constraints.append(
+        f"- TRIP TYPE: This is a \"{user_preferences['trip_type']}\" trip. Hotel and destination suggestions MUST align with this trip type."
+    )
+    hard_constraints.append(
+        f"- GROUP TYPE: The group is \"{user_preferences['travel_group_type']}\". Hotel selection MUST be appropriate for this group type."
+    )
+    hard_constraints_block = "\n".join(hard_constraints)
 
     user_content = f"""Create the trip-level summary for this trip.
 
 **DESTINATION LOCK:** The destination is "{user_preferences['places_of_interest']}". Your `city` and `state` fields MUST reflect this destination. Do NOT substitute or default to any other city — even if the Hotels Dataset below is empty.
 
+## MANDATORY USER CONSTRAINTS:
+{hard_constraints_block}
+
 ## User Preferences
 - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
 - Places of interest: {user_preferences['places_of_interest']}
 - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
-- Food preferences: {user_preferences['food_preferences']}
+- Food preferences: {user_preferences['food_preferences']}{f"{chr(10)}- Dietary restriction (food type): {food_type}" if food_type else ""}
 - Starting location: {user_preferences['user_location']}
 - Travel month: {user_preferences['current_month']}
 - Trip type: {user_preferences['trip_type']}
 - Trip duration: {trip_duration} days
 - Budget: {user_preferences['budget']}
-- Hotel preference tier: {hotel_pref}
+- Hotel preference tier: {hotel_pref}{f"{chr(10)}- Accommodation type preference: {accom_pref}" if accom_pref else ""}
 
 ## Hotels Dataset (prefer these; supplement with your knowledge)
 {top_hotels.to_csv(index=False, na_rep='null')}

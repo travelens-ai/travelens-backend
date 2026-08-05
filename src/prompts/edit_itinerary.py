@@ -133,8 +133,8 @@ Exact values for `total_days`, `from_day`, `to_day` come from the trip duration 
       "to_day": N,
       "selected": {{"name": "Best Hotel", "type": "{tier}", "price_range": "₹X–₹Y/night", "rating": "4.3", "location": "City, State", "reason": "Best match for your tier", "link": "https://..."}},
       "alternatives": [
-        {{"name": "Budget Option", "type": "budget", "price_range": "₹800–₹1,500/night", "rating": "4.0", "location": "City, State", "reason": "Affordable", "link": "https://..."}},
-        {{"name": "Luxury Option", "type": "luxury", "price_range": "₹12,000+/night", "rating": "4.8", "location": "City, State", "reason": "Premium", "link": "https://..."}}
+        {{"name": "Alt Option 1", "type": "{tier}", "price_range": "₹X–₹Y/night", "rating": "4.0", "location": "City, State", "reason": "Good alternative", "link": "https://..."}},
+        {{"name": "Alt Option 2", "type": "{tier}", "price_range": "₹X–₹Y/night", "rating": "3.9", "location": "City, State", "reason": "Another option", "link": "https://..."}}
       ]
     }}
   ],
@@ -264,24 +264,56 @@ def generate_edit_itinerary_prompt(user_preferences, top_places, top_restaurants
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
+    food_type = user_preferences.get('food_type', '').strip()
+    accom_pref = user_preferences.get('accommodation_preference', '').strip()
+
+    hard_constraints = []
+    if food_type:
+        hard_constraints.append(
+            f"- DIETARY RESTRICTION: \"{food_type}\". You MUST ONLY recommend restaurants that serve {food_type} food. "
+            f"Never suggest a restaurant that does not cater to this dietary requirement. "
+            f"This applies to every meal in every day's timeline and meal_options."
+        )
+    if accom_pref:
+        hard_constraints.append(
+            f"- ACCOMMODATION TYPE: \"{accom_pref}\". You MUST suggest {accom_pref}-type properties only. "
+            f"The Hotels Dataset is a reference — judge each listed option on quality and fit. "
+            f"If the dataset is thin or empty, use your knowledge of real well-reviewed {accom_pref} stays "
+            f"at {hotel_pref} budget for this destination. Never substitute a different property type."
+        )
+    hard_constraints.append(
+        f"- ACTIVITIES: The user selected: {', '.join(user_preferences['preferred_activities'])}. "
+        f"Include at least one of these activity types in each day's place visits."
+    )
+    hard_constraints.append(
+        f"- TRIP TYPE: This is a \"{user_preferences['trip_type']}\" trip. All suggestions MUST align with this trip type."
+    )
+    hard_constraints.append(
+        f"- GROUP TYPE: The group is \"{user_preferences['travel_group_type']}\". Tailor all suggestions to be appropriate for this group type."
+    )
+    hard_constraints_block = "\n".join(hard_constraints)
+
     user_content = f"""## Request context
 - Budget tier: {hotel_pref}
 - Trip duration: {trip_duration} days (may extend if must-include places don't fit)
 {arrival_section}
+## MANDATORY USER CONSTRAINTS — follow in every day, no exceptions:
+{hard_constraints_block}
+
 Rebuild this COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration} days fully populated. Every must-include place MUST appear. Do not stop after day 1.
 
 ## User Preferences
 - Places of interest: {user_preferences['places_of_interest']}
 - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
 - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
-- Food preferences: {user_preferences['food_preferences']}
+- Food preferences: {user_preferences['food_preferences']}{f"{chr(10)}- Dietary restriction (food type): {food_type}" if food_type else ""}
 - Starting location: {user_preferences['user_location']}
 - Travel month: {user_preferences['current_month']}
 - Trip type: {user_preferences['trip_type']}
 - Trip duration: {trip_duration} days (may be extended)
 - Start date: {user_preferences.get('start_date', 'not specified')}
 - Budget: {user_preferences['budget']}
-- Hotel preference tier: {hotel_pref}
+- Hotel preference tier: {hotel_pref}{f"{chr(10)}- Accommodation type preference: {accom_pref}" if accom_pref else ""}
 
 ## Places that MUST be included (hard requirement)
 {must_include_block}
@@ -298,7 +330,7 @@ Rebuild this COMPLETE {trip_duration}-day travel itinerary with ALL {trip_durati
 {top_hotels.to_csv(index=False, na_rep='null')}
 
 ## Rules (dynamic)
-6. Hotels grouped by city: `selected` (best for "{hotel_pref}" tier) + `alternatives`. Multi-city = one group per city.
+6. Hotels grouped by city: `selected` (best pick) + `alternatives` (1–2 options of the SAME accommodation type — all 3 must be the same property type as the user requested). Multi-city = one group per city. Use your knowledge if dataset is thin.
 11. The `itinerary` array MUST have exactly {trip_duration} fully populated day objects. Do not stop early.
 """
     return [

@@ -207,24 +207,55 @@ def generate_extra_days_prompt(user_preferences, top_places, top_restaurants, to
         f"(breakfast/lunch/dinner) for the {hotel_pref} tier."
     )
 
+    food_type = user_preferences.get('food_type', '').strip()
+    accom_pref = user_preferences.get('accommodation_preference', '').strip()
+
+    hard_constraints = []
+    if food_type:
+        hard_constraints.append(
+            f"- DIETARY RESTRICTION: \"{food_type}\". You MUST ONLY recommend restaurants that serve {food_type} food. "
+            f"Never suggest a restaurant that does not cater to this dietary requirement."
+        )
+    if accom_pref:
+        hard_constraints.append(
+            f"- ACCOMMODATION TYPE: \"{accom_pref}\". You MUST suggest {accom_pref}-type properties only. "
+            f"The Hotels Dataset is a reference — judge each listed option on quality and fit. "
+            f"If the dataset is thin or empty, use your knowledge of real well-reviewed {accom_pref} stays "
+            f"at {hotel_pref} budget for this destination. Never substitute a different property type."
+        )
+    hard_constraints.append(
+        f"- ACTIVITIES: The user selected: {', '.join(user_preferences['preferred_activities'])}. "
+        f"Include at least one of these activity types in each day's place visits."
+    )
+    hard_constraints.append(
+        f"- TRIP TYPE: This is a \"{user_preferences['trip_type']}\" trip. All suggestions MUST align with this trip type."
+    )
+    hard_constraints.append(
+        f"- GROUP TYPE: The group is \"{user_preferences['travel_group_type']}\". Tailor all suggestions to be appropriate for this group type."
+    )
+    hard_constraints_block = "\n".join(hard_constraints)
+
     user_content = f"""## Request context
 - Budget tier: {hotel_pref}
 - **DESTINATION LOCK:** The destination is "{user_preferences['places_of_interest']}". Generate all places and restaurants for THIS destination only. Do NOT substitute or default to any other city.
 {arrival_block}
+## MANDATORY USER CONSTRAINTS — follow in every day:
+{hard_constraints_block}
+
 Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} through {start_day + num_days - 1}. Do not stop early.
 
 ## Trip context
 - Destination / places of interest: {user_preferences['places_of_interest']}
 - Preferred activities: {', '.join(user_preferences['preferred_activities'])}
 - Travel group: {user_preferences['travel_group_type']} ({user_preferences['number_of_people']} people)
-- Food preferences: {user_preferences['food_preferences']}
+- Food preferences: {user_preferences['food_preferences']}{f"{chr(10)}- Dietary restriction (food type): {food_type}" if food_type else ""}
 - Starting location: {user_preferences.get('user_location', '')}
 - Travel month: {user_preferences.get('current_month', '')}
 - Trip type: {user_preferences['trip_type']}
 - Trip duration: {trip_duration} days (these are days {start_day}–{start_day + num_days - 1})
 - Start date: {user_preferences.get('start_date', 'not specified')} (use for day-of-week — do not suggest places closed on their scheduled day)
 - Budget: {user_preferences['budget']}
-- Hotel preference tier: {hotel_pref}
+- Hotel preference tier: {hotel_pref}{f"{chr(10)}- Accommodation type preference: {accom_pref}" if accom_pref else ""}
 
 ## Places already used — DO NOT reuse any of these
 {used_block}

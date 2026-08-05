@@ -33,6 +33,8 @@ def safe_prefs(p):
         "num_people": p.get("number_of_people", ""),
         "travel_group_type": p.get("travel_group_type", ""),
         "food_preferences": p.get("food_preferences", ""),
+        "food_type": p.get("food_type", ""),
+        "accommodation_preference": p.get("accommodation_preference", ""),
         "activities": p.get("preferred_activities", []),
         "start_date": p.get("start_date", ""),
     }

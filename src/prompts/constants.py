@@ -1,4 +1,5 @@
 BUDGET_TIER_MAP = {
+    'low':        'budget',
     'budget':     'budget',
     'mid range':  'mid',
     'mid':        'mid',

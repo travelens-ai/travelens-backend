@@ -87,11 +87,23 @@ def enrich_place_images(system, places_df):
     return places_df
 
 
+_ACCOMMODATION_TYPE_KEYWORDS = {
+    "resort":     ["resort"],
+    "guesthouse": ["guest house", "guesthouse"],
+    "villa":      ["villa", "cottage"],
+    "homestay":   ["homestay"],
+    "hostel":     ["hostel"],
+    "apartment":  ["service apartment", "apartment"],
+    "hotel":      ["hotel"],
+}
+
+
 def get_hotel_recommendations(system, user_preferences):
     poi = user_preferences["places_of_interest"]
     city = ", ".join(poi) if isinstance(poi, list) else str(poi)
     budget = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or '')
-    with lf_span("hotel_recommendations", input={"destination": city, "budget": budget}):
+    accom_pref = str(user_preferences.get('accommodation_preference') or '').strip().lower()
+    with lf_span("hotel_recommendations", input={"destination": city, "budget": budget, "accommodation_preference": accom_pref}):
         city_part = city.split(',')[0].strip().lower()
 
         # 1. Azure SQL / CSV (in-memory, loaded at startup)
@@ -100,6 +112,8 @@ def get_hotel_recommendations(system, user_preferences):
             system.hotels_df['address'].fillna('').astype(str).str.lower().str.contains(city_part, na=False)
         ].sort_values('site_review_rating', ascending=False)
 
+        # Star tier filter — meaningful for all types; when it returns 0 (e.g. mid+Hostel),
+        # LLM fills from knowledge. Dataset improves over time as properties get rated.
         raw = budget.strip().lower()
         pref = BUDGET_TIER_MAP.get(raw, raw)
         if pref in HOTEL_TIER_STARS:
@@ -111,6 +125,14 @@ def get_hotel_recommendations(system, user_preferences):
                 ]
             top_hotels = in_tier.reset_index(drop=True)
 
+        # Filter by accommodation type — always use type-matched set (even empty);
+        # LLM judges quality and supplements from its knowledge when dataset is thin.
+        keywords = _ACCOMMODATION_TYPE_KEYWORDS.get(accom_pref)
+        if keywords and 'property_type' in top_hotels.columns:
+            pt_col = top_hotels['property_type'].fillna('').astype(str).str.lower()
+            pattern = '|'.join(keywords)
+            top_hotels = top_hotels[pt_col.str.contains(pattern, na=False)].reset_index(drop=True)
+
         if not top_hotels.empty:
             result = top_hotels.head(100)
             lf_update_span(output={"count": len(result), "source": "db"})
@@ -121,12 +143,21 @@ def get_hotel_recommendations(system, user_preferences):
         return top_hotels.head(100)
 
 
+_FOOD_TYPE_KEYWORDS = {
+    "veg":        ["vegetarian", "pure veg"],
+    "vegan":      ["vegan"],
+    "jain":       ["jain"],
+    "eggetarian": ["vegetarian", "eggetarian", "egg"],
+}
+
+
 def get_restaurant_recommendations(system, user_preferences):
     poi = user_preferences["places_of_interest"]
     city = ", ".join(poi) if isinstance(poi, list) else str(poi)
     cuisine_raw = user_preferences["food_preferences"]
     cuisine = ", ".join(cuisine_raw) if isinstance(cuisine_raw, list) else str(cuisine_raw)
-    with lf_span("restaurant_recommendations", input={"destination": city, "cuisine": cuisine}):
+    food_type = str(user_preferences.get('food_type') or '').strip().lower()
+    with lf_span("restaurant_recommendations", input={"destination": city, "cuisine": cuisine, "food_type": food_type}):
         raw = str(user_preferences.get('hotel_preference') or user_preferences.get('budget') or '').strip().lower()
         pref = BUDGET_TIER_MAP.get(raw, raw)
         caps = MEAL_COST_CAPS.get(pref)
@@ -169,6 +200,15 @@ def get_restaurant_recommendations(system, user_preferences):
             system.restaurants_df['Cuisine'].apply(lambda x: _sc.normalize(system, x)).str.contains(cuisine_pattern, na=False)
         ].sort_values('Rating', ascending=False)
         top_restaurants = top_restaurants.drop_duplicates(subset=['Name'], keep='first')
+
+        # Soft-filter by food type (dietary restriction) if user specified one
+        food_type_keywords = _FOOD_TYPE_KEYWORDS.get(food_type)
+        if food_type_keywords and 'Cuisine' in top_restaurants.columns:
+            ft_pattern = '|'.join(food_type_keywords)
+            cuisine_col = top_restaurants['Cuisine'].apply(lambda x: _sc.normalize(system, x))
+            type_filtered = top_restaurants[cuisine_col.str.contains(ft_pattern, na=False)]
+            if len(type_filtered) >= 3:
+                top_restaurants = type_filtered
 
         C = top_restaurants['Rating'].mean()
         top_restaurants = top_restaurants.copy()

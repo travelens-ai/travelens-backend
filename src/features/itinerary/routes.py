@@ -66,6 +66,7 @@ def generate_itinerary():
             number_of_people: 3
             travel_group_type: "friends"
             food_preferences: "North Indian, Seafood"
+            food_type: "Non-Veg"
             preferred_activities: ["Beach", "Nightlife", "Sightseeing"]
             trip_type: "Beach"
             current_month: "July"
@@ -73,6 +74,7 @@ def generate_itinerary():
             budget: "25000"
             suggested_places: []
             hotel_preference: "mid"
+            accommodation_preference: "Resort"
             arrival_time: "06:00"
             departure_time: "15:00"
     responses:
@@ -252,6 +254,7 @@ def generate_itinerary_stream():
             number_of_people: 2
             travel_group_type: "couple"
             food_preferences: "North Indian"
+            food_type: "Veg"
             preferred_activities: ["Trekking", "Snow"]
             trip_type: "Mountain"
             current_month: "July"
@@ -259,6 +262,7 @@ def generate_itinerary_stream():
             budget: "30000"
             suggested_places: []
             hotel_preference: "mid"
+            accommodation_preference: "Homestay"
             arrival_time: "10:00"
             departure_time: "16:00"
     responses:
@@ -403,6 +407,7 @@ def edit_itinerary():
             number_of_people: 3
             travel_group_type: "friends"
             food_preferences: "North Indian, Seafood"
+            food_type: "Non-Veg"
             preferred_activities: ["Beach", "Sightseeing"]
             trip_type: "Beach"
             current_month: "July"
@@ -410,6 +415,7 @@ def edit_itinerary():
             budget: "25000"
             start_date: "2026-07-15"
             hotel_preference: "luxury"
+            accommodation_preference: "Resort"
     responses:
       200:
         description: Itinerary regenerated with the required places
