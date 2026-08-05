@@ -586,11 +586,19 @@ def _state_diverse(rows, max_per_state=2, total=10):
 
 
 def query_popular(lat=None, lon=None):
+    # Serve the admin-approved (published) set when one exists — fixed order, no
+    # sampling. Until an admin publishes, fall back to the legacy random curated.
+    published = _published_cards("popular")
+    if published is not None:
+        return published
     excl = _city_dedup_key(_nearest_city(lat, lon)) if lat is not None and lon is not None else None
     return _curated_city_cards(_POPULAR_CITIES, n=10, exclude_city_key=excl)
 
 
 def query_trending(lat=None, lon=None):
+    published = _published_cards("trending")
+    if published is not None:
+        return published
     excl = _city_dedup_key(_nearest_city(lat, lon)) if lat is not None and lon is not None else None
     return _curated_city_cards(_TRENDING_CITIES, n=10, exclude_city_key=excl)
 
@@ -740,3 +748,236 @@ def query_by_keyword(keyword, limit=10):
     finally:
         cursor.close()
         conn.close()
+
+
+# --- destination moderation --------------------------------------------------
+# Admin-curated popular/trending sets, persisted in `moderated_destinations`.
+# A (type, stage) pair holds an ordered set of cities; the client serves the
+# 'published' set (fixed order) when it exists, else the legacy random pool.
+
+_DESTINATION_SET_SIZE = 10
+
+# Short-lived cache of the published set's cards, keyed by type. Keeps the hot
+# client path (query_popular/query_trending) off the DB between edits. Invalidated
+# on publish. None-value entry means "no published set" (fall back to curated).
+_PUBLISHED_TTL = 5 * 60
+_published_cache = {}          # type -> ([cards]|None, expiry_monotonic)
+_published_lock = threading.Lock()
+
+
+def _pool_for(dtype):
+    """Return the curated (city, region) pool backing a moderation type."""
+    if dtype == "popular":
+        return _POPULAR_CITIES
+    if dtype == "trending":
+        return _TRENDING_CITIES
+    raise ValueError("type must be 'popular' or 'trending'")
+
+
+def _load_set(dtype, stage):
+    """Ordered [{city, region}] rows for a (type, stage) from the DB."""
+    conn = new_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT city, region FROM moderated_destinations "
+            "WHERE type = ? AND stage = ? ORDER BY position, id",
+            (dtype, stage),
+        )
+        return [{"city": r[0], "region": r[1]} for r in cursor.fetchall()]
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _replace_set(cursor, dtype, stage, entries):
+    """Within an open cursor/transaction, delete a (type, stage) set and insert
+    `entries` ([{city, region}], in order) with sequential positions."""
+    cursor.execute(
+        "DELETE FROM moderated_destinations WHERE type = ? AND stage = ?",
+        (dtype, stage),
+    )
+    for pos, e in enumerate(entries):
+        cursor.execute(
+            "INSERT INTO moderated_destinations (type, stage, city, region, position) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (dtype, stage, e["city"], e.get("region"), pos),
+        )
+
+
+def _servable_cities(city_names):
+    """Subset of the given lowercase city names that have a DB card (so they'd
+    actually render). Used to skip curated cities missing from the DB when
+    seeding/backfilling, so a set never silently comes up short of N."""
+    if not city_names:
+        return set()
+    rows = _city_aggregate_query(city_filter=list(city_names), limit=len(city_names) + 5)
+    return {str(r.get("city", "")).lower() for r in rows}
+
+
+def _seed_entries(dtype):
+    """The set to seed a fresh draft with: the published set if one exists, else
+    the first N curated-pool cities that actually have a DB card (so the seeded
+    draft always fills to N — e.g. 'varkala' has no card and is skipped)."""
+    published = _load_set(dtype, "published")
+    if published:
+        return published
+    pool = _pool_for(dtype)
+    servable = _servable_cities([c.lower() for c, _ in pool])
+    entries = []
+    for c, s in pool:
+        if len(entries) >= _DESTINATION_SET_SIZE:
+            break
+        if c.lower() in servable:
+            entries.append({"city": c, "region": s})
+    return entries
+
+
+def _enrich_cards(entries):
+    """Build client-shaped city cards for an ordered [{city, region}] list.
+    Cities missing from the DB aggregate are dropped (can't build a card)."""
+    if not entries:
+        return []
+    city_names = [str(e["city"]).lower() for e in entries]
+    rows = _city_aggregate_query(city_filter=city_names, limit=len(city_names) + 5)
+    rows = _attach_images_and_activities(rows)
+
+    # A city name can resolve to more than one DB row (e.g. Udaipur in both
+    # Rajasthan and Tripura). Keep one card per entry, preferring the row whose
+    # state matches the curated region, so the set stays exactly N.
+    region_by_city = {str(e["city"]).lower(): str(e.get("region") or "").lower() for e in entries}
+    order = {str(e["city"]).lower(): i for i, e in enumerate(entries)}
+    best = {}
+    for r in rows:
+        key = str(r.get("city", "")).lower()
+        if key not in order:
+            continue
+        cur = best.get(key)
+        matches = str(r.get("state", "")).lower() == region_by_city.get(key, "")
+        if cur is None or (matches and not cur[1]):
+            best[key] = (r, matches)
+    result = [best[k][0] for k in best]
+    result.sort(key=lambda r: order.get(str(r["city"]).lower(), 999))
+    return result
+
+
+def get_moderation_draft(dtype):
+    """Return the enriched draft cards for a type, seeding the draft first if it
+    doesn't exist yet (copy of published, else first N of the curated pool)."""
+    _pool_for(dtype)  # validate type
+    draft = _load_set(dtype, "draft")
+    if not draft:
+        draft = _seed_entries(dtype)
+        conn = new_connection()
+        cursor = conn.cursor()
+        try:
+            _replace_set(cursor, dtype, "draft", draft)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+    return {"type": dtype, "destinations": _enrich_cards(draft)}
+
+
+def remove_from_draft(dtype, cities):
+    """Remove one or more cities from the draft set and auto-fill each freed slot
+    with the next unused curated-pool city, so the set stays at N. Returns the
+    refreshed draft. Seeds the draft first if it doesn't exist."""
+    _pool_for(dtype)  # validate type
+    remove_keys = {_city_dedup_key(c) for c in (cities or []) if str(c).strip()}
+    if not remove_keys:
+        return None, ("error", "cities must be a non-empty list", 400)
+
+    draft = _load_set(dtype, "draft") or _seed_entries(dtype)
+    kept = [e for e in draft if _city_dedup_key(e["city"]) not in remove_keys]
+    removed_count = len(draft) - len(kept)
+    if removed_count == 0:
+        return None, ("error", "none of the given cities are in the draft", 404)
+
+    # Fill freed slots from the curated pool, skipping cities already present, the
+    # ones just removed (a removal should bring in a NEW place, not re-add it), and
+    # any curated city that has no DB card (would silently shrink the set below N).
+    pool = _pool_for(dtype)
+    servable = _servable_cities([c.lower() for c, _ in pool])
+    present = {_city_dedup_key(e["city"]) for e in kept}
+    skip = present | remove_keys
+    for city, region in pool:
+        if len(kept) >= _DESTINATION_SET_SIZE:
+            break
+        key = _city_dedup_key(city)
+        if key in skip or city.lower() not in servable:
+            continue
+        kept.append({"city": city, "region": region})
+        skip.add(key)
+
+    conn = new_connection()
+    cursor = conn.cursor()
+    try:
+        _replace_set(cursor, dtype, "draft", kept)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return None, ("error", str(e), 500)
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"type": dtype, "destinations": _enrich_cards(kept)}, ("success", "Draft updated", 200)
+
+
+def publish_moderation(dtype):
+    """Copy the current draft to the published set (replacing it) so the client
+    starts serving it. The draft is left in place. Returns the live cards."""
+    _pool_for(dtype)  # validate type
+    draft = _load_set(dtype, "draft")
+    if not draft:
+        return None, ("error", "no draft to publish; open moderation first", 400)
+
+    conn = new_connection()
+    cursor = conn.cursor()
+    try:
+        _replace_set(cursor, dtype, "published", draft)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return None, ("error", str(e), 500)
+    finally:
+        cursor.close()
+        conn.close()
+
+    # Warm the client cache with the just-moderated cards so the change is live
+    # immediately (no 5-min TTL wait, no re-query on the next client request).
+    cards = _enrich_cards(draft)
+    _set_published_cache(dtype, cards)
+    return {"type": dtype, "destinations": cards}, ("success", "Published", 200)
+
+
+def _invalidate_published_cache(dtype):
+    with _published_lock:
+        _published_cache.pop(dtype, None)
+
+
+def _set_published_cache(dtype, cards):
+    """Prime the published-set cache with already-enriched cards (e.g. right after
+    a publish), so the client serves the moderated set without a DB round-trip."""
+    with _published_lock:
+        _published_cache[dtype] = (cards, time.monotonic() + _PUBLISHED_TTL)
+
+
+def _published_cards(dtype):
+    """Cached enriched cards for the published set, or None if none published
+    (so the caller falls back to the legacy random curated pool)."""
+    entry = _published_cache.get(dtype)
+    if entry and time.monotonic() < entry[1]:
+        return entry[0]
+    with _published_lock:
+        entry = _published_cache.get(dtype)
+        if entry and time.monotonic() < entry[1]:
+            return entry[0]
+        published = _load_set(dtype, "published")
+        cards = _enrich_cards(published) if published else None
+        _published_cache[dtype] = (cards, time.monotonic() + _PUBLISHED_TTL)
+        return cards

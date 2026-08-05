@@ -23,6 +23,7 @@ from auth.admin.jwt_utils import admin_required
 from features.admin import service
 from features.admin.resources import RESOURCES
 from features.messaging import service as messaging_service
+import features.places.service as places_service
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -458,6 +459,157 @@ def generate_notification_copy():
         prompt=data.get("prompt"),
         tone=data.get("tone"),
     )
+    if result is not None:
+        return jsonify({"data": result}), code
+    return jsonify({"message": msg}), code
+
+
+# --- destination moderation (popular / trending) -----------------------------
+def _moderation_cities(data):
+    """Pull the city list from a remove request body, accepting either a `cities`
+    list or a single `city` string."""
+    cities = data.get("cities")
+    if cities is None and data.get("city"):
+        cities = [data.get("city")]
+    if isinstance(cities, str):
+        cities = [cities]
+    return cities or []
+
+
+@admin_bp.route("/admin/moderate-destinations", methods=["GET"])
+@admin_required
+def moderate_destinations_get():
+    """Review the draft popular/trending destinations before publishing
+
+    Returns the draft set for the given `type` (seeding it from the currently
+    published set, or the curated defaults, on first open). This is the working
+    copy the admin edits with /remove and then /submit — it is NOT what the
+    client sees until submitted.
+    ---
+    tags:
+      - Admin: Destinations
+    security:
+      - Bearer: []
+    parameters:
+      - in: query
+        name: type
+        type: string
+        required: true
+        enum: [popular, trending]
+    responses:
+      200:
+        description: '{data:{type, destinations:[...]}, status:true}'
+      400:
+        description: Invalid or missing type
+      401:
+        description: Missing or invalid admin token
+    """
+    dtype = (request.args.get("type") or "").strip().lower()
+    try:
+        result = places_service.get_moderation_draft(dtype)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+    return jsonify({"data": result}), 200
+
+
+@admin_bp.route("/admin/moderate-destinations/remove", methods=["POST"])
+@admin_required
+def moderate_destinations_remove():
+    """Remove one or more destinations from a draft; each freed slot is auto-filled
+
+    Removing a city from the draft immediately backfills the slot with the next
+    unused city from the curated pool, so the set stays full. Edits stay in the
+    draft until /submit. Accepts `cities` (list) or a single `city`.
+    ---
+    tags:
+      - Admin: Destinations
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [type, cities]
+          properties:
+            type:
+              type: string
+              enum: [popular, trending]
+            cities:
+              type: array
+              items:
+                type: string
+              example: ["Panaji", "Jaipur"]
+            city:
+              type: string
+              description: Single city alternative to `cities`
+    responses:
+      200:
+        description: '{data:{type, destinations:[...]}, status:true} — refreshed draft'
+      400:
+        description: Invalid type or empty cities
+      404:
+        description: None of the given cities are in the draft
+      401:
+        description: Missing or invalid admin token
+    """
+    data = request.json or {}
+    dtype = (data.get("type") or "").strip().lower()
+    try:
+        result, (_status, msg, code) = places_service.remove_from_draft(
+            dtype, _moderation_cities(data)
+        )
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+    if result is not None:
+        return jsonify({"data": result}), code
+    return jsonify({"message": msg}), code
+
+
+@admin_bp.route("/admin/moderate-destinations/submit", methods=["POST"])
+@admin_required
+def moderate_destinations_submit():
+    """Publish the draft so the client starts serving it
+
+    Copies the current draft for `type` to the published set. After this,
+    GET /places?type=<type> returns exactly this set, in this order.
+    ---
+    tags:
+      - Admin: Destinations
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [popular, trending]
+    responses:
+      200:
+        description: '{data:{type, destinations:[...]}, status:true} — now live'
+      400:
+        description: Invalid type or no draft to publish
+      401:
+        description: Missing or invalid admin token
+    """
+    data = request.json or {}
+    dtype = (data.get("type") or "").strip().lower()
+    try:
+        result, (_status, msg, code) = places_service.publish_moderation(dtype)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
     if result is not None:
         return jsonify({"data": result}), code
     return jsonify({"message": msg}), code
