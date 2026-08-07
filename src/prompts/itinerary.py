@@ -67,7 +67,7 @@ User's tier: {tier}. Every meal's `approx_cost` and every `meal_options` alterna
 ## TIMELINE structure — all items in ONE flat array per day
 
 Each day's `timeline` is a flat, chronological array. Every item has `type` (place / meal / hotel).
-- `place`: sightseeing stop. Fields: `name`, `location` (**MUST be "City, State" format — e.g. "Goa, Goa" or "Rome, Italy"; NEVER a neighbourhood, area, or descriptive phrase**), `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`.
+- `place`: sightseeing stop. Fields: `name`, `location` (**MUST be "City, State" format — e.g. "Goa, Goa" or "Rome, Italy"; NEVER a neighbourhood, area, or descriptive phrase**), `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`, `suitable_trip_types`, `suitable_group_types`.
 - `meal`: restaurant visit. Fields: `slot` ("breakfast"|"lunch"|"dinner"), `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `travel_from_prev`.
 - `hotel`: check-in/out event. Fields: `event` ("check_in"|"check_out"), `name`, `suggested_time`, `duration`, `travel_from_prev`, `note`.
 
@@ -113,7 +113,7 @@ Exact values for `total_days`, `from_day`, `to_day` come from the trip duration 
       "day_summary": "One-line summary e.g. Sunrise beach → temple → lunch → fort → dinner by the sea",
       "timeline": [
         {{"type": "hotel", "event": "check_in", "name": "Hotel Name", "suggested_time": "11:00 AM", "duration": "15 mins", "travel_from_prev": null, "note": "Check in and freshen up"}},
-        {{"type": "place", "name": "Place Name", "location": "City, State", "reason": "Why it fits", "activities": ["Activity 1"], "rating": "4.3", "opening_hours": "9:00 AM – 6:00 PM", "duration": "1.5–2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab from hotel"}}}},
+        {{"type": "place", "name": "Place Name", "location": "City, State", "reason": "Why it fits", "activities": ["Activity 1"], "rating": "4.3", "opening_hours": "9:00 AM – 6:00 PM", "duration": "1.5–2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab from hotel"}}, "suitable_trip_types": ["leisure", "honeymoon"], "suitable_group_types": ["couples", "friends"]}},
         {{"type": "meal", "slot": "lunch", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area Name", "near_place": "Closest place", "reason": "Great local spot", "suggested_time": "1:30 PM", "duration": "45–60 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}}},
         {{"type": "meal", "slot": "dinner", "name": "Restaurant Name", "cuisine": "Cuisine Type", "approx_cost": "₹600–₹900", "rating": "4.4", "location": "Area Name", "near_place": "Last place of the day", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60–90 mins", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}}
       ],
@@ -344,7 +344,8 @@ Generate a COMPLETE {trip_duration}-day travel itinerary with ALL {trip_duration
 2. Include all `suggested_places` within {trip_duration} days.
 3. Fill days using the Recommended Places dataset first, then your own knowledge for nearby attractions.
 3b. If destination cannot genuinely fill {trip_duration} days, output all days anyway and set `notes` with a friendly advisory.
-3c. **Distribute places evenly across days.** Do not front-load all top attractions on Day 1 and leave later days thin. Aim for a similar number of place visits per day unless arrival/departure constraints force otherwise.
+3c. **Distribute places evenly across days.**
+3d. For every `place` item set `suitable_trip_types` (array, subset of: leisure, honeymoon, adventure, spiritual, pilgrimage, family, workation, wellness, backpacking, weekend_getaway) and `suitable_group_types` (array, subset of: couples, friends, family_with_children, family_without_children, solo) based on the place's character. Use your knowledge — e.g. a beach → ["honeymoon","leisure","weekend_getaway"], a temple → ["spiritual","pilgrimage"], a zoo → ["family"]. Do not front-load all top attractions on Day 1 and leave later days thin. Aim for a similar number of place visits per day unless arrival/departure constraints force otherwise.
 4. Each day: as many geographically close places as fit (minimum 2), 3 meal slots, hotel check_in/check_out where appropriate. All in the `timeline` array — NO separate `places_to_visit` or `meals` dict.
 4b. Meal ordering — strictly enforce every day: Breakfast → 1+ place visits → Lunch → 1+ place visits → Dinner. Never place lunch immediately after breakfast or dinner immediately after lunch — always at least 1 place visit between consecutive meals.
 4b-i. Day 1 early/morning arrival EXCEPTION: if arrival_time is before 10:00 AM, breakfast MUST appear as a `type: "meal", slot: "breakfast"` timeline item. For very early arrivals (before 7 AM), breakfast is scheduled at ~8:30 AM (after the traveller has rested) — NOT at 4–5 AM. Place it before the first place visit and before the proper check-in. Do NOT put it only in meal_options.

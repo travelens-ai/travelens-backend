@@ -82,6 +82,7 @@ First try to fit all must-include places within the requested trip duration. If 
 2. Group geographically close must-include places on the same day.
 3. Extend trip if must-include places don't fit; update `total_days` and set `notes`.
 4. Fill remaining slots with dataset places or your knowledge (min 2 places/day).
+4b. For every `place` item set `suitable_trip_types` (subset of: leisure, honeymoon, adventure, spiritual, pilgrimage, family, workation, wellness, backpacking, weekend_getaway) and `suitable_group_types` (subset of: couples, friends, family_with_children, family_without_children, solo) based on the place's character.
 5. Each day: places + meals (3 slots) + hotel events all in `timeline`. Also include `meal_options`.
 7. Day 1 starts with hotel check_in (or bag-drop). Last day ends with hotel check_out before departure activities.
 8. No repeated places, hotels, or restaurants.
@@ -100,7 +101,7 @@ Exact values for `total_days`, `from_day`, `to_day` come from the trip duration 
       "day_summary": "One-line summary",
       "timeline": [
         {{"type": "hotel", "event": "check_in", "name": "Hotel Name", "suggested_time": "11:00 AM", "duration": "15 mins", "travel_from_prev": null, "note": "Check in and freshen up"}},
-        {{"type": "place", "name": "Must-include Place", "location": "City, State", "reason": "Why it fits", "activities": ["Activity"], "rating": "4.5", "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}}},
+        {{"type": "place", "name": "Must-include Place", "location": "City, State", "reason": "Why it fits", "activities": ["Activity"], "rating": "4.5", "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "11:30 AM", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}, "suitable_trip_types": ["leisure","honeymoon"], "suitable_group_types": ["couples","friends"]}},
         {{"type": "meal", "slot": "lunch", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "near_place": "Must-include Place", "reason": "Great local spot", "suggested_time": "1:30 PM", "duration": "45–60 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min"}}}},
         {{"type": "meal", "slot": "dinner", "name": "Restaurant", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60–90 mins", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}}
       ],

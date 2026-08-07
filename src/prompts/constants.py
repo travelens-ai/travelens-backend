@@ -15,6 +15,41 @@ HOTEL_TIER_STARS = {
     'luxury':  (5, 5),
 }
 
+# Google place_types tokens → trip type match (81% DB coverage)
+TRIP_TYPE_PLACE_TYPES = {
+    'adventure':  ['hiking_area', 'campground', 'sports_activity_location', 'ski_resort', 'river'],
+    'honeymoon':  ['beach', 'resort_hotel', 'spa', 'scenic_spot', 'garden'],
+    'spiritual':  ['place_of_worship', 'hindu_temple', 'buddhist_temple', 'church', 'mosque'],
+    'family':     ['amusement_park', 'zoo', 'water_park', 'national_park', 'wildlife_park'],
+    'workation':  [],
+    'leisure':    [],
+    'business':   [],
+}
+
+# Our curated `type` column values → trip type match (~300 distinct values in DB)
+TRIP_TYPE_PLACE_TYPE_NAMES = {
+    'adventure':  ['trekking trail', 'trekking', 'adventure activity', 'adventure', 'adventure spot',
+                   'glacier', 'cave', 'caves', 'wildlife safari', 'camping site', 'mountain peak',
+                   'peak', 'mountain', 'mountain pass', 'river', 'trekking route', 'adventure park'],
+    'honeymoon':  ['beach', 'scenic valley', 'waterfall', 'waterfalls', 'hill station', 'lake', 'lakes',
+                   'scenic viewpoint', 'scenic island', 'scenic hill', 'scenic mountain', 'scenic spot',
+                   'scenic area', 'botanical garden', 'river cruise', 'meadow', 'hill', 'hills',
+                   'backwaters', 'hot spring', 'hot springs'],
+    'spiritual':  ['temple', 'monastery', 'shrine', 'gurudwara', 'church', 'mosque', 'ghat',
+                   'ashram', 'stupa', 'buddhist monastery', 'sacred lake', 'religious site',
+                   'religious shrine', 'cave temple', 'cave temples', 'jain temple',
+                   'meditation center', 'meditation garden', 'yoga center', 'spiritual center',
+                   'religious', 'religious monument'],
+    'family':     ['zoo', 'amusement park', 'water park', 'national park', 'wildlife sanctuary',
+                   'botanical garden', 'aquarium', 'deer park', 'elephant camp', 'tiger reserve',
+                   'wildlife reserve', 'wildlife park', 'nature park', 'bird sanctuary',
+                   'science centre', 'science center', 'science museum', 'planetarium',
+                   'nature camp', 'ecotourism', 'eco tourism'],
+    'workation':  [],
+    'leisure':    [],
+    'business':   [],
+}
+
 # Per-meal cost caps in INR (breakfast_max, lunch_max, dinner_max).
 # Cost column in restaurants is "cost for two" — double these before comparing.
 MEAL_COST_CAPS = {

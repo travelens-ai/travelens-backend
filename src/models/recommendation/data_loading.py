@@ -46,6 +46,7 @@ def load_places_df(system):
                    p.prefer_couple AS prefer_couple,
                    p.prefer_family_children AS prefer_family_children,
                    p.prefer_family_no_children AS prefer_family_no_children,
+                   p.good_for_children AS good_for_children,
                    p.opening_hours AS opening_hours,
                    p.website_uri AS website_uri,
                    p.phone_number AS phone_number,
@@ -60,7 +61,9 @@ def load_places_df(system):
                    p.review_summary AS review_summary,
                    p.google_maps_uri AS google_maps_uri,
                    p.google_photo_refs AS google_photo_refs,
-                   p.business_status AS business_status
+                   p.business_status AS business_status,
+                   p.suitable_trip_types AS suitable_trip_types,
+                   p.suitable_group_types AS suitable_group_types
             FROM places p
             LEFT JOIN cities c ON p.city_id = c.id
             LEFT JOIN states st ON c.state_id = st.id

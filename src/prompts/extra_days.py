@@ -83,6 +83,8 @@ User's tier: {tier}. All `approx_cost` values (in timeline and meal_options) mus
 3. Each day: as many geographically close places as fit (min 2), 3 meal slots in timeline, meal_options dict.
 3b. **Meal ordering — strictly enforce every day:** Breakfast → 1 or more place visits → Lunch → 1 or more place visits → Dinner. Never place lunch immediately after breakfast, and never place dinner immediately after lunch — there must always be at least 1 place visit between consecutive meals. Between meals, include as many nearby places as naturally fit — no upper cap.
 3c. **Early morning:** If the destination is known for early morning experiences (sunrise spots, ghats, dawn markets), add a pre-breakfast place visit; breakfast follows at ~7:30–8:00 AM.
+3d. For every `place` item set `suitable_trip_types` (subset of: leisure, honeymoon, adventure, spiritual, pilgrimage, family, workation, wellness, backpacking, weekend_getaway) and `suitable_group_types` (subset of: couples, friends, family_with_children, family_without_children, solo) based on the place's character.
+3d. For every `place` item set `suitable_trip_types` (subset of: leisure, honeymoon, adventure, spiritual, pilgrimage, family, workation, wellness, backpacking, weekend_getaway) and `suitable_group_types` (subset of: couples, friends, family_with_children, family_without_children, solo) based on the place's character.
 3d. **Late night:** If the destination is famous for night experiences (night markets, beach walks, nightlife), add a post-dinner place visit after dinner.
 3e. **Even distribution:** Aim for a similar number of place visits per day — do not make some days thin while others are packed.
 4. Do not suggest a place on a day it is regularly closed (use start_date for day-of-week calculations).
@@ -306,7 +308,7 @@ Generate EXACTLY {num_days} fully populated day object(s) numbered {start_day} t
     "day_summary": "...",
     "timeline": [
       {{"type": "meal", "slot": "breakfast", "name": "Restaurant Name", "cuisine": "Type", "approx_cost": "₹150–₹250", "rating": "4.1", "location": "Area", "near_place": "First place", "reason": "Quick start", "suggested_time": "8:00 AM", "duration": "30 mins", "travel_from_prev": null}},
-      {{"type": "place", "name": "Place Name", "reason": "Why it fits", "activities": ["Activity"], "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "9:00 AM", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}}},
+      {{"type": "place", "name": "Place Name", "reason": "Why it fits", "activities": ["Activity"], "opening_hours": "9:00 AM – 6:00 PM", "duration": "2 hours", "suggested_time": "9:00 AM", "travel_from_prev": {{"duration_mins": 15, "mode": "cab", "note": "~15 min cab"}}, "suitable_trip_types": ["leisure"], "suitable_group_types": ["couples","friends"]}},
       {{"type": "meal", "slot": "lunch", "name": "Restaurant Name", "cuisine": "Type", "approx_cost": "₹400–₹600", "rating": "4.2", "location": "Area", "near_place": "Nearby place", "reason": "Good local spot", "suggested_time": "1:00 PM", "duration": "45 mins", "travel_from_prev": {{"duration_mins": 10, "mode": "auto", "note": "~10 min auto"}}}},
       {{"type": "meal", "slot": "dinner", "name": "Restaurant Name", "cuisine": "Type", "approx_cost": "₹500–₹800", "rating": "4.3", "location": "Area", "near_place": "Last place", "reason": "Relaxed dinner", "suggested_time": "8:00 PM", "duration": "60 mins", "travel_from_prev": {{"duration_mins": 20, "mode": "cab", "note": "~20 min cab"}}}}
     ],

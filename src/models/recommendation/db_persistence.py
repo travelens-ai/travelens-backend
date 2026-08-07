@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -291,14 +292,15 @@ def _save_new_places_to_db(system, cursor, itinerary, country=None):
             if name:
                 candidates.append((name, item.get('location', ''), item.get('activities'),
                                    item.get('lat'), item.get('lon'), item.get('full_address'),
-                                   item.get('rating'), item.get('opening_hours')))
+                                   item.get('rating'), item.get('opening_hours'),
+                                   item.get('suitable_trip_types'), item.get('suitable_group_types')))
     if not candidates:
         return []
 
     cursor.execute("SELECT LOWER(name) FROM places")
     existing = {row[0] for row in cursor.fetchall()}
     inserted_rows, seen = [], set()
-    for name, location, activities, lat, lon, full_address, rating, opening_hours in candidates:
+    for name, location, activities, lat, lon, full_address, rating, opening_hours, trip_types, group_types in candidates:
         key = name.lower()
         if key in existing or key in seen:
             continue
@@ -309,12 +311,14 @@ def _save_new_places_to_db(system, cursor, itinerary, country=None):
                 city = None  # bad phrase — save place with city_id=NULL, no junk city row
             city_id = _resolve_city_id(cursor, city, state, country=country)
             famous = ", ".join(activities) if isinstance(activities, list) and activities else None
+            stt = json.dumps(trip_types) if isinstance(trip_types, list) else (trip_types or None)
+            sgt = json.dumps(group_types) if isinstance(group_types, list) else (group_types or None)
             cursor.execute(
-                "INSERT INTO places (name, display_name, city_id, famous_activities, lat, lon, full_address, rating, opening_hours) "
+                "INSERT INTO places (name, display_name, city_id, famous_activities, lat, lon, full_address, rating, opening_hours, suitable_trip_types, suitable_group_types) "
                 "OUTPUT INSERTED.id "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (key, name, city_id, famous, lat, lon, full_address or None,
-                 _to_decimal(rating), opening_hours or None),
+                 _to_decimal(rating), opening_hours or None, stt, sgt),
             )
             row = cursor.fetchone()
             if row:

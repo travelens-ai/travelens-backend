@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 from models.recommendation import scoring as _sc
 from models.recommendation import image_helpers as _img
@@ -52,6 +53,48 @@ def get_place_recommendations(system, user_preferences):
                     top_places['state'].fillna('').astype(str).str.lower().apply(
                         lambda state: any(part == state for part in location_parts))
                 ].copy()
+
+        trip_type = str(user_preferences.get('trip_type') or '').strip().lower()
+        group_type = str(user_preferences.get('travel_group_type') or '').strip().lower()
+
+        _GROUP_TAG_MAP = {
+            'family-with-children':    'family_with_children',
+            'family-without-children': 'family_without_children',
+            'couples':   'couples',
+            'friends':   'friends',
+            'solo-boy':  'solo', 'solo-girl': 'solo', 'solo-mix': 'solo',
+        }
+        group_tag = _GROUP_TAG_MAP.get(group_type, '')
+
+        def _has_tag(val, tag):
+            if not val or not tag:
+                return False
+            try:
+                return tag in json.loads(val)
+            except Exception:
+                return False
+
+        # Group type filter: family-with-children — prefer Google-verified good_for_children
+        if 'family' in group_type and 'children' in group_type and 'good_for_children' in top_places.columns:
+            family_filtered = top_places[top_places['good_for_children'] == True]
+            if len(family_filtered) >= 5:
+                top_places = family_filtered.copy()
+
+        # Trip type filter using LLM tags — fall back to full set if < 10 tagged
+        if trip_type and 'suitable_trip_types' in top_places.columns:
+            tagged = top_places[top_places['suitable_trip_types'].apply(
+                lambda v: _has_tag(v, trip_type)
+            )]
+            if len(tagged) >= 10:
+                top_places = tagged.copy()
+
+        # Group type filter using LLM tags — fall back to full set if < 5 tagged
+        if group_tag and 'suitable_group_types' in top_places.columns:
+            tagged = top_places[top_places['suitable_group_types'].apply(
+                lambda v: _has_tag(v, group_tag)
+            )]
+            if len(tagged) >= 5:
+                top_places = tagged.copy()
 
         C = top_places['rating'].mean()
         top_places['rating_score'] = top_places.apply(
