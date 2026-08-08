@@ -395,15 +395,18 @@ def _save_new_restaurants_to_db(system, cursor, itinerary):
         try:
             city, _ = _parse_city_state(r.get('location', ''))
             cost = _to_decimal(r.get('approx_cost'))
+            ft = str(r.get('food_type') or '').strip().lower()
+            food_type = ft if ft in ('veg', 'non-veg', 'both') else None
             cursor.execute(
                 """INSERT INTO restaurants
-                   (name, locality, city, cuisine, rating, cost, lat, lon, full_address)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (name, locality, city, cuisine, rating, cost, lat, lon, full_address, food_type)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (name, str(r.get('location', '')).strip() or None, city,
                  str(r.get('cuisine', '')).strip() or None,
                  _to_decimal(r.get('rating')),
                  int(cost) if cost is not None else None,
-                 r.get('lat'), r.get('lon'), r.get('full_address') or None),
+                 r.get('lat'), r.get('lon'), r.get('full_address') or None,
+                 food_type),
             )
             inserted += 1
         except Exception as e:

@@ -59,7 +59,7 @@ A good trip has rhythm. Not every day should be equally packed.
 ## TIMELINE structure — all items in ONE flat array per day
 Each day's `timeline` is chronological. Every item has `type` (place / meal / hotel).
 - `place`: `name`, `location` (**MUST be "City, State" format — e.g. "Goa, Goa" or "Rome, Italy"; NEVER a neighbourhood, area, or descriptive phrase**), `reason`, `activities`, `rating`, `opening_hours`, `duration`, `suggested_time`, `travel_from_prev`.
-- `meal`: `slot` ("breakfast"|"lunch"|"dinner"), `name`, `cuisine`, `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `travel_from_prev`.
+- `meal`: `slot` ("breakfast"|"lunch"|"dinner"), `name`, `cuisine`, `food_type` ("veg"|"non-veg"|"both"), `approx_cost`, `rating`, `location`, `near_place`, `reason`, `suggested_time`, `duration`, `travel_from_prev`.
 - `hotel`: `event` ("check_in"|"check_out"), `name`, `suggested_time`, `duration`, `travel_from_prev`, `note`.
 
 `travel_from_prev` = null for first item of the day, otherwise {{"duration_mins": int, "mode": "walking|auto|cab", "note": "string"}}.
