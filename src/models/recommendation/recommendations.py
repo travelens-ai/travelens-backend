@@ -186,14 +186,6 @@ def get_hotel_recommendations(system, user_preferences):
         return top_hotels.head(100)
 
 
-_FOOD_TYPE_KEYWORDS = {
-    "veg":        ["vegetarian", "pure veg"],
-    "vegan":      ["vegan"],
-    "jain":       ["jain"],
-    "eggetarian": ["vegetarian", "eggetarian", "egg"],
-}
-
-
 def get_restaurant_recommendations(system, user_preferences):
     poi = user_preferences["places_of_interest"]
     city = ", ".join(poi) if isinstance(poi, list) else str(poi)
@@ -237,19 +229,50 @@ def get_restaurant_recommendations(system, user_preferences):
         city_part = _sc.normalize(system, city.split(',')[0])
         cuisine_pattern = '|'.join(preferred_cuisines)
 
+        city_filter = (
+            system.restaurants_df['City'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False) |
+            system.restaurants_df['Locality'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False)
+        )
+        cuisine_col = system.restaurants_df['Cuisine'].apply(lambda x: _sc.normalize(system, x))
+        # Biryani: also match on restaurant name since many biryani specialists
+        # tag themselves as North Indian/Mughlai in the cuisine field
+        if 'biryani' in cuisine_pattern:
+            name_col = system.restaurants_df['Name'].fillna('').str.lower()
+            cuisine_match = cuisine_col.str.contains(cuisine_pattern, na=False) | name_col.str.contains('biryani', na=False)
+        else:
+            cuisine_match = cuisine_col.str.contains(cuisine_pattern, na=False)
+
         top_restaurants = system.restaurants_df[
-            (system.restaurants_df['City'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False) |
-             system.restaurants_df['Locality'].apply(lambda x: _sc.normalize(system, x)).str.contains(city_part, na=False)) &
-            system.restaurants_df['Cuisine'].apply(lambda x: _sc.normalize(system, x)).str.contains(cuisine_pattern, na=False)
+            city_filter & cuisine_match
         ].sort_values('Rating', ascending=False)
         top_restaurants = top_restaurants.drop_duplicates(subset=['Name'], keep='first')
 
-        # Soft-filter by food type (dietary restriction) if user specified one
-        food_type_keywords = _FOOD_TYPE_KEYWORDS.get(food_type)
-        if food_type_keywords and 'Cuisine' in top_restaurants.columns:
-            ft_pattern = '|'.join(food_type_keywords)
-            cuisine_col = top_restaurants['Cuisine'].apply(lambda x: _sc.normalize(system, x))
-            type_filtered = top_restaurants[cuisine_col.str.contains(ft_pattern, na=False)]
+        # Soft-filter by food type using the DB-backed food_type column.
+        # Falls back gracefully when the column is absent (CSV mode) or all NULL.
+        if food_type and 'food_type' in top_restaurants.columns:
+            ft_col = top_restaurants['food_type'].fillna('').str.lower()
+            if food_type == 'veg':
+                type_filtered = top_restaurants[ft_col.isin(['veg', 'both'])]
+            elif food_type == 'non-veg':
+                type_filtered = top_restaurants[ft_col.isin(['non-veg', 'both'])]
+            elif food_type == 'vegan':
+                type_filtered = top_restaurants[
+                    ft_col.isin(['veg', 'both']) |
+                    top_restaurants['Cuisine'].fillna('').str.lower().str.contains('vegan', na=False)
+                ]
+            elif food_type == 'jain':
+                type_filtered = top_restaurants[
+                    top_restaurants['Cuisine'].apply(lambda x: _sc.normalize(system, x))
+                                   .str.contains('jain', na=False)
+                ]
+            elif food_type == 'eggetarian':
+                type_filtered = top_restaurants[
+                    ft_col.isin(['non-veg', 'both']) |
+                    top_restaurants['Cuisine'].fillna('').str.lower().str.contains('egg', na=False)
+                ]
+            else:
+                type_filtered = top_restaurants
+
             if len(type_filtered) >= 3:
                 top_restaurants = type_filtered
 

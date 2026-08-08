@@ -103,7 +103,7 @@ def load_restaurants_df(system):
         rows = fetch_dicts(
             """SELECT name AS Name, location AS Location, locality AS Locality,
                       city AS City, cuisine AS Cuisine, rating AS Rating,
-                      votes AS Votes, cost AS Cost
+                      votes AS Votes, cost AS Cost, food_type AS food_type
                FROM restaurants"""
         )
         if rows:
