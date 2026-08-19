@@ -47,6 +47,7 @@ from features.search import search_bp
 from features.config import config_bp
 from features.feedback import feedback_bp
 from features.messaging import messaging_bp
+from features.news import news_bp
 
 app = Flask(__name__)
 
@@ -110,6 +111,7 @@ app.register_blueprint(search_bp)
 app.register_blueprint(config_bp)
 app.register_blueprint(feedback_bp)
 app.register_blueprint(messaging_bp)
+app.register_blueprint(news_bp)
 app.register_blueprint(admin_auth_bp)
 app.register_blueprint(admin_bp)
 
