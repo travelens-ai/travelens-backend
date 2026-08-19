@@ -29,6 +29,10 @@ admin_bp = Blueprint("admin", __name__)
 
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 20
+# The un-moderated review queue (GET /admin/place-images) is a single top-N
+# window, not paged, so it allows a much larger cap than the paged endpoints.
+_PLACE_IMAGES_MAX_LIMIT = 1000
+_PLACE_IMAGES_DEFAULT_LIMIT = 100
 
 
 @admin_bp.before_request
@@ -237,7 +241,7 @@ def place_images_list():
         name: limit
         type: integer
         default: 100
-        description: number of images to return, 1..100 (default 100)
+        description: number of images to return, 1..1000 (default 100)
       - in: query
         name: search
         type: string
@@ -251,12 +255,12 @@ def place_images_list():
     """
     # Top-N window (no pagination) — the review queue works through the most
     # recent un-moderated batch. `limit` lets the caller cap how many rows come
-    # back; defaults to the full 100-row window and is clamped to _MAX_LIMIT.
+    # back; defaults to 100 and is clamped to _PLACE_IMAGES_MAX_LIMIT (1000).
     try:
-        limit = int(request.args.get("limit", _MAX_LIMIT))
+        limit = int(request.args.get("limit", _PLACE_IMAGES_DEFAULT_LIMIT))
     except (TypeError, ValueError):
-        limit = _MAX_LIMIT
-    limit = max(1, min(limit, _MAX_LIMIT))
+        limit = _PLACE_IMAGES_DEFAULT_LIMIT
+    limit = max(1, min(limit, _PLACE_IMAGES_MAX_LIMIT))
     search = request.args.get("search")
     result, (_status, msg, code) = service.list_place_images(
         page=1, limit=limit, search=search, moderated=False
