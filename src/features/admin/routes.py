@@ -234,21 +234,32 @@ def place_images_list():
       - Bearer: []
     parameters:
       - in: query
+        name: limit
+        type: integer
+        default: 100
+        description: number of images to return, 1..100 (default 100)
+      - in: query
         name: search
         type: string
         description: case-insensitive match on image name or place name
     responses:
       200:
         description: >
-          At most 100 rows: {data:[{image_id,image_name,image_url,source,created_at,moderated,place}], total, page, limit, status}
+          At most `limit` rows: {data:[{image_id,image_name,image_url,source,created_at,moderated,place}], total, page, limit, status}
       401:
         description: Missing or invalid admin token
     """
-    # Fixed top-100 window (no pagination) — the review queue only needs the
-    # most recent batch to work through at a time.
+    # Top-N window (no pagination) — the review queue works through the most
+    # recent un-moderated batch. `limit` lets the caller cap how many rows come
+    # back; defaults to the full 100-row window and is clamped to _MAX_LIMIT.
+    try:
+        limit = int(request.args.get("limit", _MAX_LIMIT))
+    except (TypeError, ValueError):
+        limit = _MAX_LIMIT
+    limit = max(1, min(limit, _MAX_LIMIT))
     search = request.args.get("search")
     result, (_status, msg, code) = service.list_place_images(
-        page=1, limit=100, search=search, moderated=False
+        page=1, limit=limit, search=search, moderated=False
     )
     if result is not None:
         return jsonify(result), code
